@@ -13,7 +13,7 @@ class User(Base):
     hashed_password = Column(String)
     role = Column(String) # Admin, Receptionist, Doctor, Pharmacist, Lab, Billing, Display
     is_active = Column(Boolean, default=True)
-
+    
 # --- 2. PATIENTS ---
 class Patient(Base):
     __tablename__ = "patients"

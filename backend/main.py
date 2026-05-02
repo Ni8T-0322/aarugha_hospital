@@ -31,6 +31,15 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
 
+class StaffCreate(BaseModel):
+    email: str
+    password: str
+    role: str
+
+class PatientCreate(BaseModel):
+    name: str
+    phone: str
+
 # --- STARTUP SCRIPT ---
 @app.on_event("startup")
 def create_master_admin():
@@ -78,3 +87,75 @@ def login(request: LoginRequest, db: Session = Depends(database.get_db)):
 
     # If neither exists
     raise HTTPException(status_code=404, detail="User not found in system.")
+
+@app.post("/register-staff")
+def register_staff(request: StaffCreate, db: Session = Depends(database.get_db)):
+    # 1. Check if the staff member already exists
+    existing_user = db.query(models.User).filter(models.User.email == request.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Staff email already registered.")
+        
+    # 2. Hash their temporary password
+    hashed_pw = security.hash_password(request.password)
+    
+    # 3. Create the user and save to database
+    new_user = models.User(
+        email=request.email,
+        hashed_password=hashed_pw,
+        role=request.role
+    )
+    db.add(new_user)
+    db.commit()
+    
+    return {"message": f"Successfully registered {request.role}: {request.email}"}
+
+@app.post("/register-patient")
+def register_patient(request: PatientCreate, db: Session = Depends(database.get_db)):
+    # Auto-generate the next Patient ID
+    last_patient = db.query(models.Patient).order_by(models.Patient.patient_id.desc()).first()
+    
+    if last_patient and last_patient.patient_id.startswith("PAT-"):
+        last_num = int(last_patient.patient_id.split("-")[1])
+        new_id = f"PAT-{last_num + 1}"
+    else:
+        new_id = "PAT-1000"
+
+    # Phone number as temporary password
+    hashed_pw = security.hash_password(request.phone)
+    
+    new_patient = models.Patient(
+        patient_id=new_id,
+        name=request.name,
+        phone=request.phone,
+        default_password=hashed_pw
+    )
+    db.add(new_patient)
+    db.commit()
+    
+    return {
+        "message": "Patient Successfully Registered!", 
+        "patient_id": new_id,
+        "password": request.phone
+    }
+
+@app.delete("/delete-staff/{email}")
+def delete_staff(email: str, db: Session = Depends(database.get_db)):
+    # Find the user
+    user = db.query(models.User).filter(models.User.email == email).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Staff member not found in database.")
+        
+    # Nuke them from the vault
+    db.delete(user)
+    db.commit()
+    
+    return {"message": f"Successfully terminated access for {email}"}
+@app.get("/staff")
+def get_all_staff(db: Session = Depends(database.get_db)):
+    # Grab everyone from the database
+    users = db.query(models.User).all()
+    
+    # Return a safe list (Emails and Roles only, NEVER send the hashed passwords to the frontend!)
+    staff_list = [{"email": user.email, "role": user.role} for user in users]
+    return staff_list
