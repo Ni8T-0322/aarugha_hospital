@@ -1,0 +1,7 @@
+# Python Backend
+backend/venv/
+backend/__pycache__/
+backend/aarugha.db
+
+# React Frontend
+frontend/node_modules/
