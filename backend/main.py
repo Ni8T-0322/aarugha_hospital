@@ -1,29 +1,28 @@
 # backend/main.py
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-import models
-import database
 import security
+import datetime
 
-# 1. Create the actual database tables on the hard drive
-models.Base.metadata.create_all(bind=database.engine)
+
+# Import your MongoDB collections from the updated database.py
+from database import user_collection, patient_collection, record_collection
 
 app = FastAPI(title="AARUGHA Master API")
 
-# 2. CORS Middleware (Allows your React frontend to talk to this Python backend)
+# CORS Middleware (Allows your React frontend to talk to this Python backend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows your Vite frontend to connect
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- SCHEMAS (Data validation for the login request) ---
+# --- SCHEMAS ---
 class LoginRequest(BaseModel):
-    username: str # This will be the email or the Patient ID
+    username: str 
     password: str
 
 class TokenResponse(BaseModel):
@@ -35,127 +34,179 @@ class StaffCreate(BaseModel):
     email: str
     password: str
     role: str
+    age: int      # Cloud persistent!
+    gender: str   # Cloud persistent!
 
 class PatientCreate(BaseModel):
     name: str
     phone: str
-
+class MedicalRecord(BaseModel):
+    patient_id: str
+    doctor_email: str
+    diagnosis: str
+    prescription: str
+    notes: str
 # --- STARTUP SCRIPT ---
 @app.on_event("startup")
-def create_master_admin():
-    """Silently creates the master admin account the first time the server boots."""
-    db = database.SessionLocal()
+async def create_master_admin():
+    """Silently creates the master admin account in MongoDB the first time the server boots."""
     master_email = "unagasairao+admin@gmail.com"
     
-    # Check if the master admin already exists
-    admin = db.query(models.User).filter(models.User.email == master_email).first()
+    # Check if the master admin already exists in the cloud
+    admin = await user_collection.find_one({"email": master_email})
     if not admin:
-        hashed_pw = security.hash_password("admin123") # Default testing password
-        new_admin = models.User(
-            email=master_email,
-            hashed_password=hashed_pw,
-            role="Admin"
-        )
-        db.add(new_admin)
-        db.commit()
-        print("👑 Master Admin account automatically generated!")
-    db.close()
+        hashed_pw = security.hash_password("admin123") 
+        new_admin = {
+            "email": master_email,
+            "hashed_password": hashed_pw,
+            "role": "Admin",
+            "age": 20,         
+            "gender": "Male"   
+        }
+        await user_collection.insert_one(new_admin)
+        print("👑 Master Admin account automatically generated in MongoDB Atlas!")
 
 # --- ROUTES ---
 @app.post("/login", response_model=TokenResponse)
-def login(request: LoginRequest, db: Session = Depends(database.get_db)):
-    # First, try to find a Staff Member (using email)
-    user = db.query(models.User).filter(models.User.email == request.username).first()
+async def login(request: LoginRequest):
+    # First, try to find a Staff Member
+    user = await user_collection.find_one({"email": request.username})
     
     if user:
-        if not security.verify_password(request.password, user.hashed_password):
+        if not security.verify_password(request.password, user["hashed_password"]):
             raise HTTPException(status_code=401, detail="Incorrect password.")
         
-        # Success! Generate the 8-hour JWT Token
-        token = security.create_access_token(data={"sub": user.email, "role": user.role})
-        return {"access_token": token, "token_type": "bearer", "role": user.role}
+        token = security.create_access_token(data={"sub": user["email"], "role": user["role"]})
+        return {"access_token": token, "token_type": "bearer", "role": user["role"]}
         
-    # If not staff, try to find a Patient (using Patient ID)
-    patient = db.query(models.Patient).filter(models.Patient.patient_id == request.username).first()
+    # If not staff, try to find a Patient
+    patient = await patient_collection.find_one({"patient_id": request.username})
     
     if patient:
-        if not security.verify_password(request.password, patient.default_password):
+        if not security.verify_password(request.password, patient["default_password"]):
             raise HTTPException(status_code=401, detail="Incorrect patient password.")
             
-        token = security.create_access_token(data={"sub": patient.patient_id, "role": "Patient"})
+        token = security.create_access_token(data={"sub": patient["patient_id"], "role": "Patient"})
         return {"access_token": token, "token_type": "bearer", "role": "Patient"}
 
-    # If neither exists
     raise HTTPException(status_code=404, detail="User not found in system.")
 
+
 @app.post("/register-staff")
-def register_staff(request: StaffCreate, db: Session = Depends(database.get_db)):
-    # 1. Check if the staff member already exists
-    existing_user = db.query(models.User).filter(models.User.email == request.email).first()
+async def register_staff(request: StaffCreate):
+    # Check cloud for existing user
+    existing_user = await user_collection.find_one({"email": request.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Staff email already registered.")
         
-    # 2. Hash their temporary password
     hashed_pw = security.hash_password(request.password)
     
-    # 3. Create the user and save to database
-    new_user = models.User(
-        email=request.email,
-        hashed_password=hashed_pw,
-        role=request.role
-    )
-    db.add(new_user)
-    db.commit()
+    new_user = {
+        "email": request.email,
+        "hashed_password": hashed_pw,
+        "role": request.role,
+        "age": request.age,
+        "gender": request.gender
+    }
     
-    return {"message": f"Successfully registered {request.role}: {request.email}"}
+    await user_collection.insert_one(new_user)
+    return {"message": f"Successfully registered {request.role} to MongoDB Atlas!"}
+
 
 @app.post("/register-patient")
-def register_patient(request: PatientCreate, db: Session = Depends(database.get_db)):
-    # Auto-generate the next Patient ID
-    last_patient = db.query(models.Patient).order_by(models.Patient.patient_id.desc()).first()
+async def register_patient(request: PatientCreate):
+    # Auto-generate the next Patient ID in MongoDB
+    # Sorts by patient_id descending to find the highest existing number
+    last_patient = await patient_collection.find_one(sort=[("patient_id", -1)])
     
-    if last_patient and last_patient.patient_id.startswith("PAT-"):
-        last_num = int(last_patient.patient_id.split("-")[1])
+    if last_patient and last_patient.get("patient_id", "").startswith("PAT-"):
+        last_num = int(last_patient["patient_id"].split("-")[1])
         new_id = f"PAT-{last_num + 1}"
     else:
         new_id = "PAT-1000"
 
-    # Phone number as temporary password
     hashed_pw = security.hash_password(request.phone)
     
-    new_patient = models.Patient(
-        patient_id=new_id,
-        name=request.name,
-        phone=request.phone,
-        default_password=hashed_pw
-    )
-    db.add(new_patient)
-    db.commit()
+    new_patient = {
+        "patient_id": new_id,
+        "name": request.name,
+        "phone": request.phone,
+        "default_password": hashed_pw
+    }
     
+    await patient_collection.insert_one(new_patient)
     return {
         "message": "Patient Successfully Registered!", 
         "patient_id": new_id,
         "password": request.phone
     }
 
-@app.delete("/delete-staff/{email}")
-def delete_staff(email: str, db: Session = Depends(database.get_db)):
-    # Find the user
-    user = db.query(models.User).filter(models.User.email == email).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="Staff member not found in database.")
-        
-    # Nuke them from the vault
-    db.delete(user)
-    db.commit()
-    
-    return {"message": f"Successfully terminated access for {email}"}
+
 @app.get("/staff")
-def get_all_staff(db: Session = Depends(database.get_db)):
-    # Grab everyone from the database
-    users = db.query(models.User).all()
+async def get_all_staff():
+    # Fetch all from cloud
+    cursor = user_collection.find({})
+    staff_list = []
     
-    # Return a safe list (Emails and Roles only, NEVER send the hashed passwords to the frontend!)
-    staff_list = [{"email": user.email, "role": user.role} for user in users]
+    async for user in cursor:
+        staff_list.append({
+            "email": user["email"], 
+            "role": user["role"],
+            "age": user.get("age"),
+            "gender": user.get("gender")
+        })
+        
     return staff_list
+
+
+@app.delete("/delete-staff/{email}")
+async def delete_staff(email: str):
+    # Delete directly from the cloud collection
+    result = await user_collection.delete_one({"email": email})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Staff member not found.")
+        
+    return {"message": f"Successfully deleted {email} from cloud."}
+import datetime # Make sure to import this at the top of your file if you haven't!
+
+@app.get("/patient/{patient_id}")
+async def get_patient(patient_id: str):
+    # 1. Find the patient details
+    patient = await patient_collection.find_one({"patient_id": patient_id})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient ID not found.")
+    
+    # 2. Find all their past medical records
+    cursor = record_collection.find({"patient_id": patient_id})
+    history = []
+    async for record in cursor:
+        history.append({
+            "date": record.get("date"),
+            "doctor_email": record.get("doctor_email"),
+            "diagnosis": record.get("diagnosis"),
+            "prescription": record.get("prescription"),
+            "notes": record.get("notes")
+        })
+        
+    return {
+        "patient_name": patient["name"],
+        "patient_phone": patient["phone"],
+        "history": history
+    }
+
+@app.post("/add-medical-record")
+async def add_record(record: MedicalRecord):
+    # Create the timestamped record
+    new_record = {
+        "patient_id": record.patient_id,
+        "doctor_email": record.doctor_email,
+        "diagnosis": record.diagnosis,
+        "prescription": record.prescription,
+        "notes": record.notes,
+        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M") # Stamps the exact time
+    }
+    
+    # Save to MongoDB Atlas
+    await record_collection.insert_one(new_record)
+    return {"message": "Medical record successfully signed and saved to cloud."}

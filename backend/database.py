@@ -1,22 +1,16 @@
 # backend/database.py
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base
+import motor.motor_asyncio
 
-# This creates a local SQLite file named aarugha.db inside your backend folder
-SQLALCHEMY_DATABASE_URL = "sqlite:///./aarugha.db"
+# REPLACE THIS STRING with your actual MongoDB Atlas connection string!
+# Make sure to swap out <db_password> with your database user's password.
+MONGO_DETAILS = "mongodb+srv://unagasairao_db_user:dFED7gj7d95gemHR@cluster0.kgjfrqj.mongodb.net/?appName=Cluster0"
 
-# check_same_thread=False is required for SQLite when used with FastAPI
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DETAILS)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# This creates a database named 'aarugha_hospital' in your cloud
+database = client.aarugha_hospital
 
-# Dependency to inject the database session into our routes
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# These are the collections your main.py is trying to import
+user_collection = database.get_collection("users")
+patient_collection = database.get_collection("patients")
+record_collection = database.get_collection("medical_records")
