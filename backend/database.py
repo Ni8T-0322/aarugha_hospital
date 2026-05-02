@@ -14,3 +14,5 @@ database = client.aarugha_hospital
 user_collection = database.get_collection("users")
 patient_collection = database.get_collection("patients")
 record_collection = database.get_collection("medical_records")
+# Add to the bottom of database.py
+inventory_collection = database.get_collection("inventory")
