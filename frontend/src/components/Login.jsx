@@ -11,7 +11,7 @@ const Login = () => {
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
-    e.preventDefault(); // Prevents the page from refreshing
+    e.preventDefault(); 
     setError('');
 
     try {
@@ -29,9 +29,11 @@ const Login = () => {
       // Redirect them based on their role
       const userRole = response.data.role;
       if (userRole === 'Admin') navigate('/admin');
-      else if (userRole === 'Receptionist') navigate('/receptionist'); // FIX 2: Matched App.jsx route
+      else if (userRole === 'Receptionist') navigate('/receptionist'); 
       else if (userRole === 'Doctor') navigate('/doctor');
       else if (userRole === 'Pharmacist') navigate('/pharmacy');
+      else if (userRole === 'Billing') navigate('/billing'); // Fixed!
+      else if (userRole === 'Display') navigate('/display'); // Fixed!
       else if (userRole === 'Patient') navigate('/patient');
       
     } catch (err) {
@@ -44,8 +46,8 @@ const Login = () => {
       <div className="login-box">
         <div className="logo-section">
           <Activity size={48} color="#0ea5e9" />
-          <h1>AARUGHA</h1>
-          <p>Hospital Management System</p>
+          <h1>HOSPITRAX</h1>
+          <p style={{ letterSpacing: '2px', fontWeight: 'bold', color: '#94a3b8' }}>BY AARUGHA</p>
         </div>
 
         {error && <div className="error-message">{error}</div>}

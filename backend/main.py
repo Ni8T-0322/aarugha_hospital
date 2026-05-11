@@ -4,10 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import security
 import datetime
+from bson import ObjectId
 
-
-# Import your MongoDB collections from the updated database.py
-from database import user_collection, patient_collection, record_collection
+# IMPORT FIX: Properly importing the 'database' object alongside the specific collections
+from database import database, user_collection, patient_collection, record_collection
 
 app = FastAPI(title="AARUGHA Master API")
 
@@ -20,7 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- SCHEMAS ---
+# ==========================================
+# SCHEMAS
+# ==========================================
 class LoginRequest(BaseModel):
     username: str 
     password: str
@@ -34,35 +36,50 @@ class StaffCreate(BaseModel):
     email: str
     password: str
     role: str
-    age: int      # Cloud persistent!
-    gender: str   # Cloud persistent!
+    age: int
+    gender: str
 
+class BedCreate(BaseModel):
+    bed_number: str
+    ward: str
 class PatientCreate(BaseModel):
     name: str
     phone: str
+    age: int          # <-- NEW
+    gender: str       # <-- NEW
+    blood_group: str  # <-- NEW
+
 class MedicalRecord(BaseModel):
     patient_id: str
     doctor_email: str
     diagnosis: str
     prescription: str
     notes: str
-# New Schemas for your specific roles
+    status: str = "Completed"
+    type: str = "Consultation"
+
 class BedUpdate(BaseModel):
     bed_id: str
-    status: str  # Available, Occupied, Cleaning
+    status: str
+    patient_id: str = None
 
 class QueueEntry(BaseModel):
     patient_id: str
-    priority: int  # 1-5
+    priority: int
     doctor_email: str
-# --- STARTUP SCRIPT ---
+
+class StockRequest(BaseModel):
+    medicine_name: str
+    quantity: int
+
+# ==========================================
+# STARTUP SCRIPT
+# ==========================================
 @app.on_event("startup")
 async def create_master_admin():
-    """Silently creates the master admin account in MongoDB the first time the server boots."""
     master_email = "unagasairao+admin@gmail.com"
-    
-    # Check if the master admin already exists in the cloud
     admin = await user_collection.find_one({"email": master_email})
+    
     if not admin:
         hashed_pw = security.hash_password("admin123") 
         new_admin = {
@@ -75,41 +92,34 @@ async def create_master_admin():
         await user_collection.insert_one(new_admin)
         print("👑 Master Admin account automatically generated in MongoDB Atlas!")
 
-# --- ROUTES ---
+# ==========================================
+# AUTHENTICATION & ADMIN ROUTES
+# ==========================================
 @app.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
-    # First, try to find a Staff Member
     user = await user_collection.find_one({"email": request.username})
-    
     if user:
         if not security.verify_password(request.password, user["hashed_password"]):
             raise HTTPException(status_code=401, detail="Incorrect password.")
-        
         token = security.create_access_token(data={"sub": user["email"], "role": user["role"]})
         return {"access_token": token, "token_type": "bearer", "role": user["role"]}
         
-    # If not staff, try to find a Patient
-    patient = await patient_collection.find_one({"patient_id": request.username})
-    
+    patient = await patient_collection.find_one({"patient_id": request.username.upper()})
     if patient:
         if not security.verify_password(request.password, patient["default_password"]):
             raise HTTPException(status_code=401, detail="Incorrect patient password.")
-            
         token = security.create_access_token(data={"sub": patient["patient_id"], "role": "Patient"})
         return {"access_token": token, "token_type": "bearer", "role": "Patient"}
 
     raise HTTPException(status_code=404, detail="User not found in system.")
 
-
 @app.post("/register-staff")
 async def register_staff(request: StaffCreate):
-    # Check cloud for existing user
     existing_user = await user_collection.find_one({"email": request.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Staff email already registered.")
         
     hashed_pw = security.hash_password(request.password)
-    
     new_user = {
         "email": request.email,
         "hashed_password": hashed_pw,
@@ -121,11 +131,31 @@ async def register_staff(request: StaffCreate):
     await user_collection.insert_one(new_user)
     return {"message": f"Successfully registered {request.role} to MongoDB Atlas!"}
 
+@app.get("/staff")
+async def get_all_staff():
+    cursor = user_collection.find({})
+    staff_list = []
+    async for user in cursor:
+        staff_list.append({
+            "email": user["email"], 
+            "role": user["role"],
+            "age": user.get("age"),
+            "gender": user.get("gender")
+        })
+    return staff_list
 
+@app.delete("/delete-staff/{email}")
+async def delete_staff(email: str):
+    result = await user_collection.delete_one({"email": email})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Staff member not found.")
+    return {"message": f"Successfully deleted {email} from cloud."}
+
+# ==========================================
+# RECEPTIONIST & QUEUE ROUTES
+# ==========================================
 @app.post("/register-patient")
 async def register_patient(request: PatientCreate):
-    # Auto-generate the next Patient ID in MongoDB
-    # Sorts by patient_id descending to find the highest existing number
     last_patient = await patient_collection.find_one(sort=[("patient_id", -1)])
     
     if last_patient and last_patient.get("patient_id", "").startswith("PAT-"):
@@ -135,59 +165,96 @@ async def register_patient(request: PatientCreate):
         new_id = "PAT-1000"
 
     hashed_pw = security.hash_password(request.phone)
-    
     new_patient = {
         "patient_id": new_id,
         "name": request.name,
         "phone": request.phone,
+        "age": request.age,                # <-- NEW
+        "gender": request.gender,          # <-- NEW
+        "blood_group": request.blood_group,# <-- NEW
         "default_password": hashed_pw
     }
     
     await patient_collection.insert_one(new_patient)
+    return {"message": "Patient Successfully Registered!", "patient_id": new_id, "password": request.phone}
+@app.post("/add-to-queue")
+async def add_to_queue(payload: dict):
+    patient_id = payload.get("patient_id").upper()
+    priority = int(payload.get("priority", 1))
+    
+    patient = await patient_collection.find_one({"patient_id": patient_id})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient ID not found in system.")
+        
+    queue_entry = {
+        "patient_id": patient_id,
+        "patient_name": patient["name"],
+        "priority": priority, 
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    await database.get_collection("queue").insert_one(queue_entry)
+    return {"message": f"Patient {patient_id} successfully added to the waiting queue."}
+
+@app.get("/hospital-live-status")
+async def get_hospital_status():
+    # 1. Tally up the beds
+    beds_cursor = database.get_collection("beds").find()
+    total_beds = 0
+    occupied_beds = 0
+    cleaning_beds = 0
+    
+    async for bed in beds_cursor:
+        total_beds += 1
+        if bed.get("status") == "Cleaning":
+            cleaning_beds += 1
+        elif bed.get("status") != "Available":
+            occupied_beds += 1
+
+    # 2. Find the registered Doctors
+    staff_cursor = database.get_collection("staff").find({"role": "Doctor"})
+    doctors = []
+    async for doc in staff_cursor:
+        email = doc.get("email", "")
+        name = "Doctor"
+        if "+" in email and "@" in email:
+            # Converts "unagasairao+daya.lal@gmail.com" to "Daya Lal"
+            name = email.split("+")[1].split("@")[0].replace(".", " ").title()
+        doctors.append({"name": name, "status": "Available"})
+
     return {
-        "message": "Patient Successfully Registered!", 
-        "patient_id": new_id,
-        "password": request.phone
+        "doctor_list": doctors,
+        "beds": {
+            "total": total_beds,
+            "occupied": occupied_beds,
+            "cleaning": cleaning_beds
+        }
     }
 
-
-@app.get("/staff")
-async def get_all_staff():
-    # Fetch all from cloud
-    cursor = user_collection.find({})
-    staff_list = []
-    
-    async for user in cursor:
-        staff_list.append({
-            "email": user["email"], 
-            "role": user["role"],
-            "age": user.get("age"),
-            "gender": user.get("gender")
+@app.get("/live-queue")
+async def get_live_queue():
+    cursor = database.get_collection("queue").find().sort([("priority", -1), ("timestamp", 1)])
+    queue = []
+    async for doc in cursor:
+        queue.append({
+            "queue_id": str(doc["_id"]),
+            "patient_id": doc["patient_id"],
+            "patient_name": doc["patient_name"],
+            "priority": doc["priority"],
+            "timestamp": doc["timestamp"]
         })
-        
-    return staff_list
+    return queue
 
-
-@app.delete("/delete-staff/{email}")
-async def delete_staff(email: str):
-    # Delete directly from the cloud collection
-    result = await user_collection.delete_one({"email": email})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Staff member not found.")
-        
-    return {"message": f"Successfully deleted {email} from cloud."}
-import datetime # Make sure to import this at the top of your file if you haven't!
-
+# ==========================================
+# DOCTOR & CLINICAL ROUTES
+# ==========================================
 @app.get("/patient/{patient_id}")
 async def get_patient(patient_id: str):
-    # 1. Find the patient details
-    patient = await patient_collection.find_one({"patient_id": patient_id})
+    patient = await patient_collection.find_one({"patient_id": patient_id.upper()})
     if not patient:
         raise HTTPException(status_code=404, detail="Patient ID not found.")
     
-    # 2. Find all their past medical records
-    cursor = record_collection.find({"patient_id": patient_id})
+    cursor = record_collection.find({"patient_id": patient_id.upper()}).sort("date", 1)
     history = []
     async for record in cursor:
         history.append({
@@ -195,60 +262,43 @@ async def get_patient(patient_id: str):
             "doctor_email": record.get("doctor_email"),
             "diagnosis": record.get("diagnosis"),
             "prescription": record.get("prescription"),
-            "notes": record.get("notes")
+            "notes": record.get("notes"),
+            "lab_result": record.get("lab_result", "N/A")
         })
         
+    # We added the new fields to the return dictionary here!
     return {
-        "patient_name": patient["name"],
+        "patient_name": patient["name"], 
         "patient_phone": patient["phone"],
+        "age": patient.get("age", "N/A"),
+        "gender": patient.get("gender", "N/A"),
+        "blood_group": patient.get("blood_group", "N/A"),
         "history": history
     }
 
 @app.post("/add-medical-record")
 async def add_record(record: MedicalRecord):
-    # Create the timestamped record
     new_record = {
-        "patient_id": record.patient_id,
+        "patient_id": record.patient_id.upper(),
         "doctor_email": record.doctor_email,
         "diagnosis": record.diagnosis,
         "prescription": record.prescription,
         "notes": record.notes,
-        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M") # Stamps the exact time
+        "status": record.status,
+        "type": record.type,
+        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     
-    # Save to MongoDB Atlas
     await record_collection.insert_one(new_record)
-    return {"message": "Medical record successfully signed and saved to cloud."}
+    await database.get_collection("queue").delete_one({"patient_id": record.patient_id.upper()})
+    return {"message": "Medical record successfully signed and saved."}
 
-@app.get("/hospital-status")
-async def get_hospital_status():
-    # Count available beds
-    total_beds = await database.get_collection("beds").count_documents({})
-    available_beds = await database.get_collection("beds").count_documents({"status": "Available"})
-    
-    # Get active queue count
-    queue_count = await database.get_collection("queue").count_documents({})
-    
-    # Get available doctors
-    active_doctors = await user_collection.find({"role": "Doctor", "status": "Available"}).to_list(100)
-    
-    return {
-        "beds_summary": f"{available_beds}/{total_beds} Available",
-        "queue_size": queue_count,
-        "doctors_online": len(active_doctors)
-    }
-
-
-# Schema for stock requests
-class StockRequest(BaseModel):
-    medicine_name: str
-    quantity: int
-
+# ==========================================
+# PHARMACY & BILLING ROUTES
+# ==========================================
 @app.get("/pending-prescriptions")
 async def get_pending_prescriptions():
-    # Finds records where a prescription exists but hasn't been "cleared" by pharmacy yet
-    # For now, we'll fetch the latest medical records
-    cursor = record_collection.find().sort("date", -1).limit(20)
+    cursor = record_collection.find({"type": "Consultation/Pharmacy"}).sort("date", -1)
     prescriptions = []
     async for doc in cursor:
         prescriptions.append({
@@ -256,96 +306,176 @@ async def get_pending_prescriptions():
             "patient_id": doc["patient_id"],
             "prescription": doc["prescription"],
             "doctor": doc["doctor_email"],
-            "status": doc.get("status", "Pending Price") # Pending Price, Waiting Payment, Dispensed
+            "status": doc.get("status", "Pending Price"),
+            "price": doc.get("price", 0)
         })
     return prescriptions
 
-@app.post("/request-stock")
-async def request_stock(request: StockRequest):
-    # This sends a "notification" to the admin (via the audit_logs)
-    log_entry = {
-        "event": "Stock Request",
-        "detail": f"Pharmacist requested {request.quantity} units of {request.medicine_name}",
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    await database.get_collection("audit_logs").insert_one(log_entry)
-    return {"message": "Request sent to Admin."}
+@app.post("/set-medication-price")
+async def set_medication_price(payload: dict):
+    record_id = payload.get("record_id")
+    price = float(payload.get("price", 0))
+    
+    await record_collection.update_one(
+        {"_id": ObjectId(record_id)},
+        {"$set": {"price": price, "status": "Waiting Payment"}}
+    )
+    return {"message": f"Price set to ₹{price}. Sent to Billing."}
 
 @app.get("/patient-billing/{patient_id}")
 async def get_patient_billing(patient_id: str):
-    # This searches for any record related to this patient that has a price but isn't paid
-    # Checking medical_records for medications that were priced by the pharmacist
-    cursor = record_collection.find({"patient_id": patient_id, "status": "Waiting Payment"})
+    cursor = record_collection.find({"patient_id": patient_id.upper(), "status": "Waiting Payment"})
     unpaid_items = []
     async for doc in cursor:
         unpaid_items.append({
             "record_id": str(doc["_id"]),
-            "item": f"Medication: {doc['prescription']}",
+            "item": f"{doc.get('type', 'Charge')}: {doc.get('diagnosis', 'General')}",
             "amount": doc.get("price", 0),
-            "type": "Pharmacy"
+            "type": doc.get("type", "Unknown")
         })
     return unpaid_items
 
+@app.get("/billing/pending-patients")
+async def get_pending_billing_patients():
+    cursor = record_collection.find({"status": "Waiting Payment"})
+    patients = set()
+    async for doc in cursor:
+        patients.add(doc["patient_id"])
+    # Returns a clean, sorted list of patient IDs who owe money
+    return sorted(list(patients))
+
 @app.post("/confirm-payment")
 async def confirm_payment(payload: dict):
-    # Updates the status to 'Paid' so the Pharmacist/Lab Guy gets the green light
     record_id = payload.get("record_id")
-    from bson import ObjectId
     
     await record_collection.update_one(
         {"_id": ObjectId(record_id)},
         {"$set": {"status": "Paid", "payment_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}}
     )
-    
-    # Log the transaction for the Admin's audit logs
-    await database.get_collection("audit_logs").insert_one({
-        "event": "Payment Confirmed",
-        "detail": f"Bill Guy cleared payment for record {record_id}",
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    })
-    
     return {"message": "Payment Successful. Green signal sent to department."}
 
-@app.get("/pending-lab-tests")
-async def get_pending_tests():
-    # Looks for records where a doctor assigned a 'scan' or 'test'
-    # We filter for items that are 'Paid' so the lab guy knows they have the green light
-    cursor = record_collection.find({"status": "Paid", "type": "Lab/Scan"})
-    tests = []
-    async for doc in cursor:
-        tests.append({
-            "record_id": str(doc["_id"]),
-            "patient_id": doc["patient_id"],
-            "test_required": doc.get("diagnosis"), # The 'scan' name is stored here
-            "doctor": doc["doctor_email"]
-        })
-    return tests
-
-@app.post("/upload-lab-result")
-async def upload_result(payload: dict):
-    from bson import ObjectId
+@app.post("/dispense-medication")
+async def dispense_medication(payload: dict):
     record_id = payload.get("record_id")
-    result_data = payload.get("result_data") # This could be text or a file link
     
     await record_collection.update_one(
         {"_id": ObjectId(record_id)},
-        {"$set": {
-            "status": "Completed", 
-            "lab_result": result_data,
-            "completed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        }}
+        {"$set": {"status": "Dispensed"}}
     )
-    return {"message": "Results uploaded and attached to Patient EMR."}
+    return {"message": "Medication successfully handed to patient."}
 
+# ==========================================
+# ADMIN V2 ROUTES (Beds & Inventory)
+# ==========================================
+@app.post("/admin/add-bed")
+async def add_bed(request: BedCreate):
+    new_bed = {
+        "bed_number": request.bed_number,
+        "ward": request.ward,
+        "status": "Available",
+        "patient_id": None
+    }
+    await database.get_collection("beds").insert_one(new_bed)
+    return {"message": f"Bed {request.bed_number} added to {request.ward}"}
+
+@app.get("/admin/beds")
+async def get_beds():
+    cursor = database.get_collection("beds").find()
+    beds = []
+    async for bed in cursor:
+        beds.append({
+            "bed_id": str(bed["_id"]),
+            "bed_number": bed["bed_number"],
+            "ward": bed["ward"],
+            "status": bed["status"],
+            "patient_id": bed.get("patient_id")
+        })
+    return beds
+
+@app.post("/admin/update-bed")
+async def update_bed(payload: dict):
+    bed_id = payload.get("bed_id")
+    status = payload.get("status")
+    await database.get_collection("beds").update_one(
+        {"_id": ObjectId(bed_id)},
+        {"$set": {"status": status}}
+    )
+    return {"message": f"Bed status updated to {status}"}
+
+@app.get("/admin/stock-requests")
+async def get_stock_requests():
+    cursor = database.get_collection("inventory_requests").find({"status": "Pending"})
+    requests = []
+    async for req in cursor:
+        requests.append({
+            "request_id": str(req["_id"]),
+            "medicine_name": req["medicine_name"],
+            "quantity": req["quantity"],
+            "requested_by": req.get("requested_by", "Pharmacy"),
+            "date": req.get("date", "")
+        })
+    return requests
+
+@app.post("/admin/approve-stock")
+async def approve_stock(payload: dict):
+    request_id = payload.get("request_id")
+    medicine_name = payload.get("medicine_name")
+    quantity = int(payload.get("quantity"))
+    
+    # 1. Mark request as Approved
+    await database.get_collection("inventory_requests").update_one(
+        {"_id": ObjectId(request_id)},
+        {"$set": {"status": "Approved"}}
+    )
+    
+    # 2. Add to actual Inventory Database!
+    existing_item = await database.get_collection("inventory").find_one({"medicine_name": medicine_name})
+    if existing_item:
+        await database.get_collection("inventory").update_one(
+            {"medicine_name": medicine_name},
+            {"$inc": {"stock": quantity}}
+        )
+    else:
+        await database.get_collection("inventory").insert_one({
+            "medicine_name": medicine_name,
+            "stock": quantity
+        })
+    return {"message": f"Approved {quantity}x {medicine_name}. Added to Inventory!"}
+
+# OVERWRITE the old /request-stock route to use the new inventory_requests collection
+@app.post("/request-stock")
+async def request_stock(request: StockRequest):
+    log_entry = {
+        "medicine_name": request.medicine_name,
+        "quantity": request.quantity,
+        "requested_by": "Pharmacy",
+        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "status": "Pending"
+    }
+    await database.get_collection("inventory_requests").insert_one(log_entry)
+    return {"message": "Restock request sent directly to Admin."}
+
+@app.get("/inventory")
+async def get_inventory():
+    cursor = database.get_collection("inventory").find().sort("medicine_name", 1)
+    inventory = []
+    async for item in cursor:
+        inventory.append({
+            "item_id": str(item["_id"]),
+            "medicine_name": item["medicine_name"],
+            "stock": item.get("stock", 0)
+        })
+    return inventory
+
+# ==========================================
+# PATIENT PORTAL
+# ==========================================
 @app.get("/patient-portal-full/{patient_id}")
 async def get_patient_portal_full(patient_id: str):
-    # 1. Fetch Profile
     patient = await patient_collection.find_one({"patient_id": patient_id.upper()})
     if not patient:
         raise HTTPException(status_code=404, detail="Patient record not found.")
     
-    # 2. Fetch All Interactions (Medical, Lab, Pharmacy)
-    # We sort by date descending so the newest health events appear first
     cursor = record_collection.find({"patient_id": patient_id.upper()}).sort("date", -1)
     history = []
     async for doc in cursor:
@@ -353,49 +483,67 @@ async def get_patient_portal_full(patient_id: str):
             "date": doc.get("date"),
             "diagnosis": doc.get("diagnosis"),
             "prescription": doc.get("prescription"),
-            "status": doc.get("status"), # e.g., 'Paid', 'Waiting Payment', 'Completed'
-            "lab_result": doc.get("lab_result", "N/A"),
+            "status": doc.get("status"), 
             "price": doc.get("price", 0),
             "doctor": doc.get("doctor_email", "").split('+')[1].split('@')[0] if '+' in doc.get("doctor_email", "") else "Doctor"
         })
         
     return {
-        "profile": {
-            "name": patient["name"],
-            "id": patient["patient_id"],
-            "phone": patient["phone"]
-        },
+        "profile": {"name": patient["name"], "id": patient["patient_id"], "phone": patient["phone"]},
         "history": history
     }
 
-@app.get("/hospital-live-status")
-async def get_live_status():
-    # 1. Fetch available vs occupied beds
-    total_beds = await database.get_collection("beds").count_documents({})
-    occupied_beds = await database.get_collection("beds").count_documents({"status": "Occupied"})
-    cleaning_beds = await database.get_collection("beds").count_documents({"status": "Cleaning"})
-    
-    # 2. Fetch Doctor Statuses
-    # We find all staff with role 'Doctor'
-    doctors_cursor = user_collection.find({"role": "Doctor"})
-    doctor_list = []
-    async for doc in doctors_cursor:
-        doctor_list.append({
-            "name": doc["name"],
-            "status": doc.get("status", "Available") # Available, Busy, Away
-        })
 
-    # 3. Queue Count
-    queue_size = await database.get_collection("queue").count_documents({})
+class FacilityBill(BaseModel):
+    patient_id: str
+    amount: int
+    description: str
 
-    return {
-        "beds": {
-            "total": total_beds,
-            "occupied": occupied_beds,
-            "cleaning": cleaning_beds,
-            "available": total_beds - occupied_beds - cleaning_beds
-        },
-        "doctors": doctor_list,
-        "queue": queue_size,
-        "time": datetime.datetime.now().strftime("%I:%M %p")
+@app.post("/discharge/add-bill")
+async def add_facility_bill(request: FacilityBill):
+    # This automatically sends the final bed cost directly to the Billing Dept!
+    record = {
+        "patient_id": request.patient_id.upper(),
+        "doctor_email": "Administration",
+        "diagnosis": "Facility & Bed Charges",
+        "prescription": request.description,
+        "notes": "Final Discharge Billing",
+        "status": "Waiting Payment",
+        "type": "Discharge/Facility",
+        "price": request.amount,
+        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
+    await database.get_collection("records").insert_one(record)
+    return {"message": "Facility bill generated and sent to Billing Department."}
+
+@app.post("/discharge/finalize")
+async def finalize_discharge(payload: dict):
+    patient_id = payload.get("patient_id").upper()
+    
+    # 1. Fetch all records to build the final invoice
+    cursor = database.get_collection("records").find({"patient_id": patient_id})
+    history = []
+    total = 0
+    
+    async for doc in cursor:
+        price = doc.get("price", 0)
+        # Clean the price data
+        if isinstance(price, str) and price.isdigit():
+            price = int(price)
+        elif not isinstance(price, (int, float)):
+            price = 0
+            
+        history.append({
+            "item": doc.get("diagnosis", "Charge"),
+            "desc": doc.get("prescription", ""),
+            "amount": price,
+            "status": doc.get("status", "Unknown"),
+            "date": doc.get("date", "")
+        })
+        if doc.get("status") == "Paid":
+            total += price
+            
+    # 2. Clear them from the live medical queue
+    await database.get_collection("queue").delete_one({"patient_id": patient_id})
+
+    return {"message": "Patient Discharged", "receipt": history, "total": total}
