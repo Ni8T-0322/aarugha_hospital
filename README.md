@@ -27,12 +27,12 @@ The system features strict routing bouncers. Users are automatically redirected 
 Simply run the `start.bat` file located in the root directory. This will automatically boot both the frontend and backend servers simultaneously.
 
 **Manual Start:**
-1. **Backend:** ```bash
+1. **Backend:** 
    cd backend
    source venv/Scripts/activate  # (or .\venv\Scripts\activate on Windows)
    uvicorn main:app --reload
 
-2. **Frontend:** ```bash
+2. **Frontend:** 
 cd frontend
 npm run dev
 
