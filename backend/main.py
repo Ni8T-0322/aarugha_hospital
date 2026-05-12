@@ -402,6 +402,13 @@ async def update_bed(payload: dict):
     )
     return {"message": f"Bed status updated to {status}"}
 
+from bson import ObjectId # Make sure you have this import at the top if it isn't already there!
+
+@app.delete("/admin/delete-bed/{bed_id}")
+async def delete_bed(bed_id: str):
+    await database.get_collection("beds").delete_one({"_id": ObjectId(bed_id)})
+    return {"message": "Bed successfully deleted."}
+
 @app.get("/admin/stock-requests")
 async def get_stock_requests():
     cursor = database.get_collection("inventory_requests").find({"status": "Pending"})
@@ -468,6 +475,14 @@ async def log_action(payload: dict):
     await database.get_collection("audit_logs").insert_one(log_entry)
     return {"message": "Action successfully logged."}
 
+@app.post("/admin/clear-all-bills/{patient_id}")
+async def clear_all_bills(patient_id: str):
+    await database.get_collection("records").update_many(
+        {"patient_id": patient_id.upper(), "status": "Waiting Payment"},
+        {"$set": {"status": "Paid"}}
+    )
+    return {"message": "All bills cleared!"}
+
 # OVERWRITE the old /request-stock route to use the new inventory_requests collection
 @app.post("/request-stock")
 async def request_stock(request: StockRequest):
@@ -498,26 +513,27 @@ async def get_inventory():
 # ==========================================
 @app.get("/patient-portal-full/{patient_id}")
 async def get_patient_portal_full(patient_id: str):
-    patient = await patient_collection.find_one({"patient_id": patient_id.upper()})
+    patient = await database.get_collection("patients").find_one({"patient_id": patient_id.upper()})
     if not patient:
-        raise HTTPException(status_code=404, detail="Patient record not found.")
+        raise HTTPException(status_code=404, detail="Patient not found")
     
-    cursor = record_collection.find({"patient_id": patient_id.upper()}).sort("date", -1)
+    # Safely convert the ObjectId to a string
+    patient["_id"] = str(patient["_id"])
+    
+    cursor = database.get_collection("records").find({"patient_id": patient_id.upper()})
     history = []
     async for doc in cursor:
         history.append({
-            "date": doc.get("date"),
-            "diagnosis": doc.get("diagnosis"),
-            "prescription": doc.get("prescription"),
-            "status": doc.get("status"), 
+            "id": str(doc["_id"]),
+            "diagnosis": doc.get("diagnosis", "Unknown"),
+            "prescription": doc.get("prescription", "N/A"),
             "price": doc.get("price", 0),
-            "doctor": doc.get("doctor_email", "").split('+')[1].split('@')[0] if '+' in doc.get("doctor_email", "") else "Doctor"
+            "status": doc.get("status", "Pending"),
+            "type": doc.get("type", "Medical"),
+            "date": doc.get("date", "")
         })
-        
-    return {
-        "profile": {"name": patient["name"], "id": patient["patient_id"], "phone": patient["phone"]},
-        "history": history
-    }
+    
+    return {"profile": patient, "history": history}
 
 
 class FacilityBill(BaseModel):

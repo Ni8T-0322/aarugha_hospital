@@ -8,7 +8,7 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState('add-staff'); 
   
-  // States
+  // Staff States
   const [staffList, setStaffList] = useState([]);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -17,8 +17,13 @@ const AdminDashboard = () => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('Doctor');
   const [showPassword, setShowPassword] = useState(false);
+  
+  // Patient Registration States
   const [patientName, setPatientName] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
+  const [patientAge, setPatientAge] = useState('');
+  const [patientGender, setPatientGender] = useState('');
+  const [patientBloodGroup, setPatientBloodGroup] = useState('');
 
   // V2 Dashboard States
   const [beds, setBeds] = useState([]);
@@ -79,10 +84,7 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
       const res = await axios.post('http://127.0.0.1:8000/register-staff', { email: generatedEmail, password, role, age: parseInt(age), gender });
-      
-      // FIRE AUDIT LOG
       await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Created Staff Account', user: 'Master Admin', details: `Registered ${generatedEmail} as ${role}` });
-
       alert("✅ " + res.data.message);
       setFirstName(''); setLastName(''); setAge(''); setGender(''); setPassword('');
     } catch (err) { alert("❌ Registration failed."); }
@@ -93,7 +95,6 @@ const AdminDashboard = () => {
     if (!window.confirm(`Terminate ${emailToDelete}?`)) return;
     try { 
         await axios.delete(`http://127.0.0.1:8000/delete-staff/${emailToDelete}`); 
-        // FIRE AUDIT LOG
         await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Terminated Staff', user: 'Master Admin', details: `Deleted account for ${emailToDelete}` });
         fetchStaff(); 
     } catch (err) {}
@@ -102,24 +103,20 @@ const AdminDashboard = () => {
   const handleAddPatient = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://127.0.0.1:8000/register-patient', { name: patientName, phone: patientPhone, age: 0, gender: "N/A", blood_group: "N/A" });
-      
-      // FIRE AUDIT LOG
-      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Emergency Patient Registration', user: 'Master Admin', details: `Registered ${patientName} with ID ${res.data.patient_id}` });
-
-      alert(`✅ Patient Registered! ID: ${res.data.patient_id}`);
-      setPatientName(''); setPatientPhone('');
-    } catch (err) {}
+      const res = await axios.post('http://127.0.0.1:8000/register-patient', { 
+          name: patientName, phone: patientPhone, age: parseInt(patientAge), gender: patientGender, blood_group: patientBloodGroup 
+      });
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Admin Patient Registration', user: 'Master Admin', details: `Registered ${patientName} with ID ${res.data.patient_id}` });
+      alert(`✅ Patient Registered! ID: ${res.data.patient_id}\nDefault Password: ${res.data.password}`);
+      setPatientName(''); setPatientPhone(''); setPatientAge(''); setPatientGender(''); setPatientBloodGroup('');
+    } catch (err) { alert("❌ Error registering patient."); }
   };
 
   const handleAddBed = async (e) => {
     e.preventDefault();
     try {
       await axios.post('http://127.0.0.1:8000/admin/add-bed', { bed_number: bedNum, ward: wardName });
-      
-      // FIRE AUDIT LOG
       await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Added Bed', user: 'Master Admin', details: `Added bed ${bedNum} to ${wardName}` });
-
       setBedNum(''); fetchBeds();
     } catch (err) {}
   };
@@ -127,28 +124,46 @@ const AdminDashboard = () => {
   const handleUpdateBed = async (id, status) => {
     try { await axios.post('http://127.0.0.1:8000/admin/update-bed', { bed_id: id, status }); fetchBeds(); } catch (err) {}
   };
+  
+  const handleDeleteBed = async (id, bedNum, ward) => {
+    if (!window.confirm(`⚠️ Are you sure you want to permanently delete ${ward} - Bed ${bedNum}?`)) return;
+    try {
+      await axios.delete(`http://127.0.0.1:8000/admin/delete-bed/${id}`);
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Deleted Bed', user: 'Master Admin', details: `Deleted bed ${bedNum} from ${ward}` });
+      fetchBeds();
+    } catch (err) { alert("Error deleting bed."); }
+  };
 
   const handleApproveStock = async (req) => {
     try {
       await axios.post('http://127.0.0.1:8000/admin/approve-stock', req);
-      
-      // FIRE AUDIT LOG
       await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Approved Stock', user: 'Master Admin', details: `Approved ${req.quantity} units of ${req.medicine_name}` });
-
       fetchStockRequests();
     } catch (err) { alert("Error approving stock"); }
   };
 
+  // --- BILLING FIX: Add Clear Bills Logic ---
   const handleSearchBilling = async (e) => {
-    e.preventDefault();
+    if(e) e.preventDefault();
     try {
       const res = await axios.get(`http://127.0.0.1:8000/patient-portal-full/${billingSearchId.toUpperCase()}`);
       setBillingStatus(res.data);
     } catch (err) { alert("Patient not found."); setBillingStatus(null); }
   };
 
+  const handleClearBills = async () => {
+    try {
+        await axios.post(`http://127.0.0.1:8000/admin/clear-all-bills/${billingSearchId.toUpperCase()}`);
+        await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Cleared Bills', user: 'Master Admin', details: `Cleared all dues for ${billingSearchId}` });
+        alert("✅ All pending bills for this patient have been marked as PAID!");
+        // Instantly refresh the data
+        const res = await axios.get(`http://127.0.0.1:8000/patient-portal-full/${billingSearchId.toUpperCase()}`);
+        setBillingStatus(res.data);
+    } catch (err) { alert("Error clearing bills."); }
+  };
+
   const handleSearchDischarge = async (e) => {
-    e.preventDefault();
+    if(e) e.preventDefault();
     setReceiptData(null);
     try {
       const res = await axios.get(`http://127.0.0.1:8000/patient-portal-full/${dischargeId.toUpperCase()}`);
@@ -160,25 +175,22 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
         await axios.post('http://127.0.0.1:8000/discharge/add-bill', { patient_id: dischargeId, amount: parseInt(bedCost), description: bedDesc });
-        alert("✅ Facility bill sent to Billing!");
-        handleSearchDischarge(e); 
+        alert("✅ Facility bill sent to Billing! Go to the Billing Tab to clear it.");
+        handleSearchDischarge(); 
     } catch (err) { alert("Error adding bill."); }
   };
 
   const handleFinalizeDischarge = async () => {
       try {
           const res = await axios.post('http://127.0.0.1:8000/discharge/finalize', { patient_id: dischargeId });
-          
-          // FIRE AUDIT LOG
           await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Finalized Discharge', user: 'Master Admin', details: `Discharged patient ${dischargeId}` });
-
           setReceiptData(res.data);
       } catch (err) { alert("Error finalizing discharge."); }
   };
 
   const history = dischargePatient?.history || [];
-  const pendingMedical = history.some(h => (h.status === 'Waiting Payment' || h.status === 'Pending Price') && h.type !== 'Discharge/Facility');
-  const facilityBill = history.find(h => h.type === 'Discharge/Facility');
+  const pendingMedical = history.some(h => (h.status === 'Waiting Payment' || h.status === 'Pending Price') && h.type !== 'Discharge/Facility' && h.diagnosis !== 'Facility & Bed Charges');
+  const facilityBill = history.find(h => h.type === 'Discharge/Facility' || h.diagnosis === 'Facility & Bed Charges');
 
   return (
     <div className="dashboard-container">
@@ -266,9 +278,27 @@ const AdminDashboard = () => {
             <div className="form-card no-print">
               <h2>Emergency / Admin Patient Registration</h2>
               <form onSubmit={handleAddPatient} style={{ marginTop: '20px' }}>
-                  <input type="text" value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Patient Name" required style={{ width: '100%', padding: '12px', marginBottom: '15px' }} />
-                  <input type="tel" value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="Phone Number" required style={{ width: '100%', padding: '12px', marginBottom: '15px' }} />
-                  <button type="submit" className="action-button">Generate ID</button>
+                  <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                      <input type="text" value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full Name" required style={{ flex: 2, padding: '12px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#0f172a', color: 'white' }} />
+                      <input type="tel" value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="Phone Number" required style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#0f172a', color: 'white' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                      <input type="number" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} placeholder="Age" required min="1" max="120" style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#0f172a', color: 'white' }} />
+                      <select value={patientGender} onChange={(e) => setPatientGender(e.target.value)} required style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#0f172a', color: 'white' }}>
+                          <option value="" disabled>Select Gender...</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                      </select>
+                      <select value={patientBloodGroup} onChange={(e) => setPatientBloodGroup(e.target.value)} required style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#0f172a', color: 'white' }}>
+                          <option value="" disabled>Select Blood...</option>
+                          <option value="A+">A+</option><option value="A-">A-</option>
+                          <option value="B+">B+</option><option value="B-">B-</option>
+                          <option value="AB+">AB+</option><option value="AB-">AB-</option>
+                          <option value="O+">O+</option><option value="O-">O-</option>
+                      </select>
+                  </div>
+                  <button type="submit" className="action-button">Register Patient & Generate ID</button>
               </form>
             </div>
         )}
@@ -312,18 +342,23 @@ const AdminDashboard = () => {
                     <input type="text" value={bedNum} onChange={(e) => setBedNum(e.target.value)} placeholder="Bed Number (e.g. B-101)" required style={{ flex: 1, padding: '12px' }} />
                     <button type="submit" className="action-button" style={{ width: 'auto' }}>Add Bed</button>
                 </form>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
-                    {beds.map((b) => (
-                        <div key={b.bed_id} style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '8px', borderTop: `4px solid ${b.status === 'Available' ? '#10b981' : b.status === 'Cleaning' ? '#f59e0b' : '#ef4444'}` }}>
-                            <h3 style={{ margin: 0 }}>{b.ward} - {b.bed_number}</h3>
-                            <p style={{ color: '#94a3b8', margin: '5px 0 15px 0' }}>Status: <strong>{b.status}</strong></p>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <button onClick={() => handleUpdateBed(b.bed_id, 'Available')} style={{ flex: 1, padding: '8px', backgroundColor: '#064e3b', color: '#10b981', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Set Free</button>
-                                <button onClick={() => handleUpdateBed(b.bed_id, 'Cleaning')} style={{ flex: 1, padding: '8px', backgroundColor: '#78350f', color: '#f59e0b', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Clean</button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
+               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
+                  {beds.map((b) => (
+                      <div key={b.bed_id} style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '8px', borderTop: `4px solid ${b.status === 'Available' ? '#10b981' : b.status === 'Cleaning' ? '#f59e0b' : '#ef4444'}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <h3 style={{ margin: 0 }}>{b.ward} - {b.bed_number}</h3>
+                              <button onClick={() => handleDeleteBed(b.bed_id, b.bed_number, b.ward)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }} title="Delete Bed">
+                                  <Trash2 size={18} />
+                              </button>
+                          </div>
+                          <p style={{ color: '#94a3b8', margin: '5px 0 15px 0' }}>Status: <strong>{b.status}</strong></p>
+                          <div style={{ display: 'flex', gap: '10px' }}>
+                              <button onClick={() => handleUpdateBed(b.bed_id, 'Available')} style={{ flex: 1, padding: '8px', backgroundColor: '#064e3b', color: '#10b981', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Set Free</button>
+                              <button onClick={() => handleUpdateBed(b.bed_id, 'Cleaning')} style={{ flex: 1, padding: '8px', backgroundColor: '#78350f', color: '#f59e0b', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Clean</button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
             </div>
         )}
 
@@ -346,6 +381,7 @@ const AdminDashboard = () => {
             </div>
         )}
 
+        {/* --- FULLY UPDATED BILLING TAB WITH PAY BUTTON --- */}
         {activeView === 'billing' && (
             <div className="no-print">
                 <h2>Patient Billing Lookup</h2>
@@ -356,7 +392,15 @@ const AdminDashboard = () => {
 
                 {billingStatus && (
                     <div className="form-card">
-                        <h3>{billingStatus.profile.name}'s History</h3>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h3 style={{ margin: 0 }}>{billingStatus.profile.name}'s History</h3>
+                            {/* THE NEW GOD-MODE CLEAR BUTTON */}
+                            {billingStatus.history.some(h => h.status === 'Waiting Payment') && (
+                                <button onClick={handleClearBills} style={{ backgroundColor: '#10b981', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <CheckCircle size={18} /> Clear All Pending Dues
+                                </button>
+                            )}
+                        </div>
                         {billingStatus.history.map((h, i) => (
                             <div key={i} style={{ padding: '15px', backgroundColor: '#0f172a', borderLeft: `4px solid ${h.status === 'Paid' ? '#10b981' : h.status === 'Waiting Payment' ? '#f59e0b' : '#3b82f6'}`, marginBottom: '10px' }}>
                                 <p style={{ margin: 0, fontWeight: 'bold' }}>{h.diagnosis} (Rx: {h.prescription})</p>
@@ -384,7 +428,7 @@ const AdminDashboard = () => {
             </div>
         )}
 
-        {/* --- NEW DISCHARGE & BILLING TAB --- */}
+        {/* --- DISCHARGE TAB --- */}
         {activeView === 'discharge' && (
             <div>
                 {!receiptData && (
@@ -422,7 +466,7 @@ const AdminDashboard = () => {
                                 ) : facilityBill.status === 'Waiting Payment' ? (
                                     <div style={{ padding: '20px', backgroundColor: '#422006', borderLeft: '4px solid #f59e0b', borderRadius: '8px', marginTop: '20px' }}>
                                         <h3 style={{ color: '#fcd34d', margin: '0 0 5px 0' }}>Step 2: Waiting for Payment</h3>
-                                        <p style={{ color: '#fbbf24', margin: 0 }}>Facility bill generated (₹{facilityBill.price}). Patient must clear this at the Billing Desk before final discharge.</p>
+                                        <p style={{ color: '#fbbf24', margin: 0 }}>Facility bill generated (₹{facilityBill.price}). Switch to the <strong>Patient Billing</strong> tab on the left to clear this due!</p>
                                     </div>
                                 ) : (
                                     <div style={{ padding: '20px', backgroundColor: '#064e3b', borderLeft: '4px solid #10b981', borderRadius: '8px', marginTop: '20px' }}>
@@ -467,7 +511,7 @@ const AdminDashboard = () => {
                                 {receiptData.receipt.map((item, idx) => (
                                     <tr key={idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
                                         <td style={{ padding: '15px 0' }}><strong>{item.item}</strong><br/><span style={{ fontSize: '12px', color: '#64748b' }}>{item.desc}</span></td>
-                                        <td style={{ padding: '15px 0', color: '#64748b' }}>{item.type}</td>
+                                        <td style={{ padding: '15px 0', color: '#64748b' }}>{item.type || (item.item === 'Facility & Bed Charges' ? 'Discharge/Facility' : 'Medical')}</td>
                                         <td style={{ padding: '15px 0', textAlign: 'right', fontWeight: 'bold' }}>₹{item.amount}</td>
                                     </tr>
                                 ))}

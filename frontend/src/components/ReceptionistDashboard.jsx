@@ -59,7 +59,7 @@ const ReceptionistDashboard = () => {
 
   // --- DISCHARGE LOGIC ---
   const handleSearchDischarge = async (e) => {
-    e.preventDefault();
+    if(e) e.preventDefault();
     setReceiptData(null);
     try {
       const res = await axios.get(`http://127.0.0.1:8000/patient-portal-full/${dischargeId.toUpperCase()}`);
@@ -71,8 +71,8 @@ const ReceptionistDashboard = () => {
     e.preventDefault();
     try {
         await axios.post('http://127.0.0.1:8000/discharge/add-bill', { patient_id: dischargeId, amount: parseInt(bedCost), description: bedDesc });
-        alert("✅ Facility bill sent to Billing! Wait for them to clear it.");
-        handleSearchDischarge(e); // Refresh data
+        alert("✅ Facility bill generated! Send patient to the Billing Desk to clear it.");
+        handleSearchDischarge(); // Refresh data
     } catch (err) { alert("Error adding bill."); }
   };
 
@@ -83,10 +83,18 @@ const ReceptionistDashboard = () => {
       } catch (err) { alert("Error finalizing discharge."); }
   };
 
-  // Discharge Status Checks
+  // --- BUG FIX: Smart identification fallback for Sanny ---
   const history = dischargePatient?.history || [];
-  const pendingMedical = history.some(h => (h.status === 'Waiting Payment' || h.status === 'Pending Price') && h.type !== 'Discharge/Facility');
-  const facilityBill = history.find(h => h.type === 'Discharge/Facility');
+  const pendingMedical = history.some(h => 
+      (h.status === 'Waiting Payment' || h.status === 'Pending Price') && 
+      h.type !== 'Discharge/Facility' && 
+      h.diagnosis !== 'Facility & Bed Charges'
+  );
+  
+  const facilityBill = history.find(h => 
+      h.type === 'Discharge/Facility' || 
+      h.diagnosis === 'Facility & Bed Charges'
+  );
 
   return (
     <div className="dashboard-container">
@@ -133,7 +141,7 @@ const ReceptionistDashboard = () => {
                   </div>
                   <div className="input-group" style={{ flex: 1 }}><label>Blood Group</label>
                     <select value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} className="role-select" required>
-                      <option value="" disabled>Select...</option><option value="A+">A+</option><option value="O+">O+</option><option value="B+">B+</option><option value="AB+">AB+</option>
+                      <option value="" disabled>Select...</option><option value="A+">A+</option><option value="O+">O+</option><option value="B+">B+</option><option value="AB+">AB+</option><option value="A-">A-</option><option value="O-">O-</option><option value="B-">B-</option><option value="AB-">AB-</option>
                     </select>
                   </div>
                 </div>
@@ -169,7 +177,7 @@ const ReceptionistDashboard = () => {
           </div>
         )}
 
-        {/* --- NEW DISCHARGE & BILLING TAB --- */}
+        {/* --- DISCHARGE & BILLING TAB --- */}
         {activeTab === 'discharge' && (
             <div>
                 {!receiptData && (
@@ -207,7 +215,7 @@ const ReceptionistDashboard = () => {
                                 ) : facilityBill.status === 'Waiting Payment' ? (
                                     <div style={{ padding: '20px', backgroundColor: '#422006', borderLeft: '4px solid #f59e0b', borderRadius: '8px', marginTop: '20px' }}>
                                         <h3 style={{ color: '#fcd34d', margin: '0 0 5px 0' }}>Step 2: Waiting for Payment</h3>
-                                        <p style={{ color: '#fbbf24', margin: 0 }}>Facility bill generated (₹{facilityBill.price}). Patient must clear this at the Billing Desk before final discharge.</p>
+                                        <p style={{ color: '#fbbf24', margin: 0 }}>Facility bill generated (₹{facilityBill.price}). Send the patient to the <strong>Billing Department</strong> to clear this due!</p>
                                     </div>
                                 ) : (
                                     <div style={{ padding: '20px', backgroundColor: '#064e3b', borderLeft: '4px solid #10b981', borderRadius: '8px', marginTop: '20px' }}>
@@ -225,10 +233,10 @@ const ReceptionistDashboard = () => {
                 {receiptData && (
                     <div className="receipt-paper" style={{ backgroundColor: '#f8fafc', padding: '40px', borderRadius: '12px', color: '#0f172a', maxWidth: '800px', margin: '0 auto' }}>
                         <div style={{ textAlign: 'center', borderBottom: '2px solid #cbd5e1', paddingBottom: '20px', marginBottom: '20px' }}>
-                         <h1 style={{ margin: '0 0 5px 0', fontSize: '28px', color: '#0f172a' }}>HOSPITRAX</h1>
-                          <p style={{ margin: '0 0 5px 0', color: '#0ea5e9', fontWeight: 'bold', letterSpacing: '1px' }}>BY AARUGHA</p>
-                          <p style={{ margin: 0, color: '#64748b' }}>Final Patient Invoice & Discharge Summary</p>
-                    </div>
+                            <h1 style={{ margin: '0 0 5px 0', fontSize: '28px', color: '#0f172a' }}>HOSPITRAX</h1>
+                            <p style={{ margin: '0 0 5px 0', color: '#0ea5e9', fontWeight: 'bold', letterSpacing: '1px' }}>BY AARUGHA</p>
+                            <p style={{ margin: 0, color: '#64748b' }}>Final Patient Invoice & Discharge Summary</p>
+                        </div>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
                             <div>
@@ -252,7 +260,7 @@ const ReceptionistDashboard = () => {
                                 {receiptData.receipt.map((item, idx) => (
                                     <tr key={idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
                                         <td style={{ padding: '15px 0' }}><strong>{item.item}</strong><br/><span style={{ fontSize: '12px', color: '#64748b' }}>{item.desc}</span></td>
-                                        <td style={{ padding: '15px 0', color: '#64748b' }}>{item.type}</td>
+                                        <td style={{ padding: '15px 0', color: '#64748b' }}>{item.type || (item.item === 'Facility & Bed Charges' ? 'Discharge/Facility' : 'Medical')}</td>
                                         <td style={{ padding: '15px 0', textAlign: 'right', fontWeight: 'bold' }}>₹{item.amount}</td>
                                     </tr>
                                 ))}
