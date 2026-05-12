@@ -41,13 +41,14 @@ const DisplayDashboard = () => {
     <div style={{ height: '100vh', width: '100vw', backgroundColor: '#020617', color: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       
       {/* HEADER BAR */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-  <Activity size={40} color="#0ea5e9" />
-  <div>
-    <h1 style={{ margin: 0, fontSize: '28px', letterSpacing: '2px' }}>HOSPITRAX</h1>
-    <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px', letterSpacing: '1px' }}>BY AARUGHA • LIVE OPERATIONS CENTER</p>
-  </div>
-</div>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', backgroundColor: '#0f172a', borderBottom: '2px solid #1e293b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <Activity size={40} color="#0ea5e9" />
+          <div>
+            <h1 style={{ margin: 0, fontSize: '28px', letterSpacing: '2px' }}>HOSPITRAX</h1>
+            <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px', letterSpacing: '1px' }}>BY AARUGHA • LIVE OPERATIONS CENTER</p>
+          </div>
+        </div>
         
         <div style={{ textAlign: 'right' }}>
           <h2 style={{ margin: 0, fontSize: '36px', color: '#f8fafc', fontWeight: 'bold', fontFamily: 'monospace' }}>{timeString}</h2>
