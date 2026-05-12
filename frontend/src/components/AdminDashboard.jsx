@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Users, UserPlus, LogOut, ShieldAlert, Eye, EyeOff, Trash2, UserCircle, Bed, Pill, Receipt, ListOrdered, CheckCircle, FileCheck, Printer, AlertTriangle } from 'lucide-react';
+import { Users, UserPlus, LogOut, ShieldAlert, Eye, EyeOff, Trash2, UserCircle, Bed, Pill, Receipt, ListOrdered, CheckCircle, FileCheck, Printer, AlertTriangle, ClipboardList } from 'lucide-react';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -28,6 +28,7 @@ const AdminDashboard = () => {
   const [billingSearchId, setBillingSearchId] = useState('');
   const [billingStatus, setBillingStatus] = useState(null);
   const [liveQueue, setLiveQueue] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
 
   // Discharge States
   const [dischargeId, setDischargeId] = useState('');
@@ -57,10 +58,15 @@ const AdminDashboard = () => {
     try { const res = await axios.get('http://127.0.0.1:8000/live-queue'); setLiveQueue(res.data); } catch (err) {}
   };
 
+  const fetchAuditLogs = async () => {
+    try { const res = await axios.get('http://127.0.0.1:8000/admin/audit-logs'); setAuditLogs(res.data); } catch (err) {}
+  };
+
   useEffect(() => {
     if (activeView === 'view-staff') fetchStaff();
     if (activeView === 'beds') fetchBeds();
     if (activeView === 'pharmacy') fetchStockRequests();
+    if (activeView === 'audit') fetchAuditLogs();
     if (activeView === 'queue') {
         fetchQueue();
         const interval = setInterval(fetchQueue, 5000);
@@ -73,6 +79,10 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
       const res = await axios.post('http://127.0.0.1:8000/register-staff', { email: generatedEmail, password, role, age: parseInt(age), gender });
+      
+      // FIRE AUDIT LOG
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Created Staff Account', user: 'Master Admin', details: `Registered ${generatedEmail} as ${role}` });
+
       alert("✅ " + res.data.message);
       setFirstName(''); setLastName(''); setAge(''); setGender(''); setPassword('');
     } catch (err) { alert("❌ Registration failed."); }
@@ -81,13 +91,22 @@ const AdminDashboard = () => {
   const handleDeleteStaff = async (emailToDelete) => {
     if (emailToDelete === 'unagasairao+admin@gmail.com') return alert("⚠️ Cannot delete Master Admin!");
     if (!window.confirm(`Terminate ${emailToDelete}?`)) return;
-    try { await axios.delete(`http://127.0.0.1:8000/delete-staff/${emailToDelete}`); fetchStaff(); } catch (err) {}
+    try { 
+        await axios.delete(`http://127.0.0.1:8000/delete-staff/${emailToDelete}`); 
+        // FIRE AUDIT LOG
+        await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Terminated Staff', user: 'Master Admin', details: `Deleted account for ${emailToDelete}` });
+        fetchStaff(); 
+    } catch (err) {}
   };
 
   const handleAddPatient = async (e) => {
     e.preventDefault();
     try {
       const res = await axios.post('http://127.0.0.1:8000/register-patient', { name: patientName, phone: patientPhone, age: 0, gender: "N/A", blood_group: "N/A" });
+      
+      // FIRE AUDIT LOG
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Emergency Patient Registration', user: 'Master Admin', details: `Registered ${patientName} with ID ${res.data.patient_id}` });
+
       alert(`✅ Patient Registered! ID: ${res.data.patient_id}`);
       setPatientName(''); setPatientPhone('');
     } catch (err) {}
@@ -97,6 +116,10 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
       await axios.post('http://127.0.0.1:8000/admin/add-bed', { bed_number: bedNum, ward: wardName });
+      
+      // FIRE AUDIT LOG
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Added Bed', user: 'Master Admin', details: `Added bed ${bedNum} to ${wardName}` });
+
       setBedNum(''); fetchBeds();
     } catch (err) {}
   };
@@ -108,6 +131,10 @@ const AdminDashboard = () => {
   const handleApproveStock = async (req) => {
     try {
       await axios.post('http://127.0.0.1:8000/admin/approve-stock', req);
+      
+      // FIRE AUDIT LOG
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Approved Stock', user: 'Master Admin', details: `Approved ${req.quantity} units of ${req.medicine_name}` });
+
       fetchStockRequests();
     } catch (err) { alert("Error approving stock"); }
   };
@@ -141,6 +168,10 @@ const AdminDashboard = () => {
   const handleFinalizeDischarge = async () => {
       try {
           const res = await axios.post('http://127.0.0.1:8000/discharge/finalize', { patient_id: dischargeId });
+          
+          // FIRE AUDIT LOG
+          await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Finalized Discharge', user: 'Master Admin', details: `Discharged patient ${dischargeId}` });
+
           setReceiptData(res.data);
       } catch (err) { alert("Error finalizing discharge."); }
   };
@@ -173,6 +204,7 @@ const AdminDashboard = () => {
           <button className={`nav-item ${activeView === 'add-staff' ? 'active' : ''}`} onClick={() => setActiveView('add-staff')}><UserPlus size={18} /> Add Staff</button>
           <button className={`nav-item ${activeView === 'view-staff' ? 'active' : ''}`} onClick={() => setActiveView('view-staff')}><Users size={18} /> View Staff</button>
           <button className={`nav-item ${activeView === 'add-patient' ? 'active' : ''}`} onClick={() => setActiveView('add-patient')}><UserCircle size={18} /> Register Patient</button>
+          <button className={`nav-item ${activeView === 'audit' ? 'active' : ''}`} onClick={() => setActiveView('audit')}><ClipboardList size={18} /> Audit Logs</button>
           
           <p style={{ color: '#64748b', fontSize: '12px', padding: '0 15px', marginTop: '20px' }}>HOSPITAL OPS</p>
           <button className={`nav-item ${activeView === 'beds' ? 'active' : ''}`} onClick={() => setActiveView('beds')}><Bed size={18} /> Ward & Beds</button>
@@ -238,6 +270,36 @@ const AdminDashboard = () => {
                   <input type="tel" value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="Phone Number" required style={{ width: '100%', padding: '12px', marginBottom: '15px' }} />
                   <button type="submit" className="action-button">Generate ID</button>
               </form>
+            </div>
+        )}
+
+        {activeView === 'audit' && (
+            <div className="no-print">
+                <h2>System Audit Logs</h2>
+                <div className="form-card" style={{ padding: '20px' }}>
+                    {auditLogs.length === 0 ? <p style={{ color: '#94a3b8' }}>No logs recorded yet. System events will appear here.</p> : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                            <thead>
+                                <tr style={{ color: '#94a3b8', borderBottom: '1px solid #334155' }}>
+                                    <th style={{ padding: '10px 0' }}>Timestamp</th>
+                                    <th style={{ padding: '10px 0' }}>User</th>
+                                    <th style={{ padding: '10px 0' }}>Action</th>
+                                    <th style={{ padding: '10px 0' }}>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {auditLogs.map((log) => (
+                                    <tr key={log.id} style={{ borderBottom: '1px solid #1e293b' }}>
+                                        <td style={{ padding: '15px 0', color: '#94a3b8', fontSize: '13px' }}>{log.timestamp}</td>
+                                        <td style={{ padding: '15px 0', color: '#0ea5e9', fontWeight: 'bold' }}>{log.user}</td>
+                                        <td style={{ padding: '15px 0', color: 'white' }}>{log.action}</td>
+                                        <td style={{ padding: '15px 0', color: '#cbd5e1', fontSize: '14px' }}>{log.details}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
             </div>
         )}
 
@@ -379,8 +441,8 @@ const AdminDashboard = () => {
                     <div className="receipt-paper" style={{ backgroundColor: '#f8fafc', padding: '40px', borderRadius: '12px', color: '#0f172a', maxWidth: '800px', margin: '0 auto' }}>
                         <div style={{ textAlign: 'center', borderBottom: '2px solid #cbd5e1', paddingBottom: '20px', marginBottom: '20px' }}>
                             <h1 style={{ margin: '0 0 5px 0', fontSize: '28px', color: '#0f172a' }}>HOSPITRAX</h1>
-                             <p style={{ margin: '0 0 5px 0', color: '#0ea5e9', fontWeight: 'bold', letterSpacing: '1px' }}>BY AARUGHA</p>
-                             <p style={{ margin: 0, color: '#64748b' }}>Final Patient Invoice & Discharge Summary</p>
+                            <p style={{ margin: '0 0 5px 0', color: '#0ea5e9', fontWeight: 'bold', letterSpacing: '1px' }}>BY AARUGHA</p>
+                            <p style={{ margin: 0, color: '#64748b' }}>Final Patient Invoice & Discharge Summary</p>
                         </div>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>

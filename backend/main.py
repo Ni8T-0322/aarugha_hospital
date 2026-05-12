@@ -441,6 +441,32 @@ async def approve_stock(payload: dict):
             "stock": quantity
         })
     return {"message": f"Approved {quantity}x {medicine_name}. Added to Inventory!"}
+@app.get("/admin/audit-logs")
+async def get_audit_logs():
+    # Fetches the 50 most recent logs from the database
+    cursor = database.get_collection("audit_logs").find().sort("timestamp", -1).limit(50)
+    logs = []
+    async for log in cursor:
+        logs.append({
+            "id": str(log["_id"]),
+            "action": log.get("action", "Unknown Action"),
+            "user": log.get("user", "System"),
+            "timestamp": log.get("timestamp", ""),
+            "details": log.get("details", "")
+        })
+    return logs
+
+@app.post("/admin/log-action")
+async def log_action(payload: dict):
+    # A universal endpoint you can call anytime you want to record an event!
+    log_entry = {
+        "action": payload.get("action"),
+        "user": payload.get("user"),
+        "details": payload.get("details"),
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    await database.get_collection("audit_logs").insert_one(log_entry)
+    return {"message": "Action successfully logged."}
 
 # OVERWRITE the old /request-stock route to use the new inventory_requests collection
 @app.post("/request-stock")
