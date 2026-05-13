@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Stethoscope, Search, FileText, LogOut, PlusCircle, Clock, User, List, Activity, UserCheck, AlertCircle } from 'lucide-react';
+import { Stethoscope, Search, FileText, LogOut, PlusCircle, Clock, User, List, Activity, UserCheck, AlertCircle, Bed } from 'lucide-react';
 
 const DoctorDashboard = () => {
   const navigate = useNavigate();
@@ -22,7 +22,10 @@ const DoctorDashboard = () => {
   const [prescription, setPrescription] = useState('');
   const [labTest, setLabTest] = useState('');
   const [notes, setNotes] = useState('');
+  
+  // NEW: Bed Allocation States
   const [needsAdmission, setNeedsAdmission] = useState(false);
+  const [wardChoice, setWardChoice] = useState('General');
 
   // 1. Fetch Live Queue
   const fetchQueue = async () => {
@@ -53,6 +56,8 @@ const DoctorDashboard = () => {
   const handleCallPatient = async (patient) => {
     setActiveTab('consultation');
     updateStatus('Busy');
+    setNeedsAdmission(false);
+    setWardChoice('General');
     
     try {
       const res = await axios.get(`http://127.0.0.1:8000/patient/${patient.patient_id}`);
@@ -87,6 +92,8 @@ const DoctorDashboard = () => {
       setPatientHistory(res.data.history || []);
       setActiveTab('consultation');
       updateStatus('Busy');
+      setNeedsAdmission(false);
+      setWardChoice('General');
     } catch (err) {
       alert("Patient ID not found in system.");
     }
@@ -103,7 +110,9 @@ const DoctorDashboard = () => {
         prescription: prescription || "None",
         notes: notes,
         status: "Waiting Payment", 
-        type: "Consultation/Pharmacy"
+        type: "Consultation/Pharmacy",
+        allocate_bed: needsAdmission,
+        ward_choice: needsAdmission ? wardChoice : null
       };
       
       await axios.post('http://127.0.0.1:8000/add-medical-record', payload);
@@ -113,20 +122,27 @@ const DoctorDashboard = () => {
             ...payload,
             diagnosis: labTest, 
             prescription: "N/A",
-            type: "Lab/Scan"
+            type: "Lab/Scan",
+            allocate_bed: false, // Prevent the lab order from trying to re-allocate a bed
+            ward_choice: null
         });
       }
 
-      alert(`✅ Consultation Finished for ${currentPatient.patient_name}.\nRecords sent to Pharmacy${labTest ? ' & Lab' : ''} waiting on Billing clearance.${needsAdmission ? '\n⚠️ Admission request sent to Reception.' : ''}`);
+      alert(`✅ Consultation Finished for ${currentPatient.patient_name}.\nRecords sent to Pharmacy${labTest ? ' & Lab' : ''} waiting on Billing clearance.${needsAdmission ? `\n🛏️ Successfully Allocated to ${wardChoice}.` : ''}`);
       
-      setDiagnosis(''); setPrescription(''); setLabTest(''); setNotes(''); setNeedsAdmission(false);
+      setDiagnosis(''); setPrescription(''); setLabTest(''); setNotes(''); setNeedsAdmission(false); setWardChoice('General');
       setCurrentPatient(null);
       setActiveTab('queue');
       updateStatus('Available');
       fetchQueue();
 
     } catch (err) {
-      alert("❌ Error saving record.");
+      // THIS CATCHES THE WARD FULL ERROR FROM THE BACKEND!
+      if (err.response && err.response.status === 400) {
+         alert(`⚠️ ALLOCATION FAILED:\n\n${err.response.data.detail}`);
+      } else {
+         alert("❌ Error saving record.");
+      }
     }
   };
 
@@ -239,7 +255,7 @@ const DoctorDashboard = () => {
                 {/* LEFT COLUMN: PROFILE & HISTORY */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '70vh' }}>
                     
-                    {/* TOP LEFT: PATIENT PROFILE (NEW) */}
+                    {/* TOP LEFT: PATIENT PROFILE */}
                     <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '20px' }}>
                         <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0, color: '#38bdf8', marginBottom: '15px' }}><User size={20} /> Patient Demographics</h3>
                         <p style={{ color: '#94a3b8', margin: '0 0 5px 0', fontSize: '0.9rem' }}><strong>Phone:</strong> <span style={{ color: '#e2e8f0' }}>{currentPatient.patient_phone || 'N/A'}</span></p>
@@ -296,9 +312,22 @@ const DoctorDashboard = () => {
                             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} required rows="3" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white' }} placeholder="Patient presents with..." />
                         </div>
 
-                        <div style={{ padding: '15px', backgroundColor: '#450a0a', border: '1px solid #ef4444', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <input type="checkbox" id="admit" checked={needsAdmission} onChange={(e) => setNeedsAdmission(e.target.checked)} style={{ width: '20px', height: '20px' }} />
-                            <label htmlFor="admit" style={{ color: '#fca5a5', cursor: 'pointer', fontWeight: 'bold' }}>Patient Requires Immediate Bed Admission</label>
+                        {/* --- NEW: UPDATED BED ALLOCATION MODULE --- */}
+                        <div style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', marginTop: '10px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: 'white', fontWeight: 'bold', fontSize: '16px' }}>
+                                <input type="checkbox" checked={needsAdmission} onChange={(e) => setNeedsAdmission(e.target.checked)} style={{ width: '20px', height: '20px', cursor: 'pointer' }} />
+                                <Bed size={24} color="#a855f7" /> Patient Requires Bed Admission
+                            </label>
+                            
+                            {needsAdmission && (
+                                <div style={{ marginTop: '20px', paddingLeft: '34px' }}>
+                                    <label style={{ color: '#94a3b8', marginBottom: '8px', display: 'block' }}>Select Required Ward</label>
+                                    <select value={wardChoice} onChange={(e) => setWardChoice(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', fontSize: '16px' }}>
+                                        <option value="General">General Ward</option>
+                                        <option value="ICU">Intensive Care Unit (ICU)</option>
+                                    </select>
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>

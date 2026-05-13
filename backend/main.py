@@ -40,8 +40,8 @@ class StaffCreate(BaseModel):
     gender: str
 
 class BedCreate(BaseModel):
-    bed_number: str
     ward: str
+    num_beds: int
 class PatientCreate(BaseModel):
     name: str
     phone: str
@@ -56,7 +56,9 @@ class MedicalRecord(BaseModel):
     prescription: str
     notes: str
     status: str = "Completed"
-    type: str = "Consultation"
+    type: str = "Consultation/Pharmacy"
+    allocate_bed: bool = False
+    ward_choice: str = None
 
 class BedUpdate(BaseModel):
     bed_id: str
@@ -278,6 +280,29 @@ async def get_patient(patient_id: str):
 
 @app.post("/add-medical-record")
 async def add_record(record: MedicalRecord):
+    
+    # --- NEW: STRICT BED ALLOCATION LOGIC ---
+    if record.allocate_bed and record.ward_choice:
+        # Search for an explicitly "Available" bed in the requested ward
+        free_bed = await database.get_collection("beds").find_one({
+            "ward": record.ward_choice,
+            "status": "Available"
+        })
+        
+        # If no beds are free (or they are all Cleaning/Occupied), BLOCK the submission!
+        if not free_bed:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"CRITICAL: No 'Available' beds remaining in {record.ward_choice}. Please check ward capacity or wait for staff to finish cleaning."
+            )
+        
+        # If a bed is free, instantly lock it down and assign the patient to it
+        await database.get_collection("beds").update_one(
+            {"_id": free_bed["_id"]},
+            {"$set": {"status": "Occupied", "patient_id": record.patient_id.upper()}}
+        )
+
+    # Proceed with saving the medical record as normal
     new_record = {
         "patient_id": record.patient_id.upper(),
         "doctor_email": record.doctor_email,
@@ -369,14 +394,23 @@ async def dispense_medication(payload: dict):
 # ==========================================
 @app.post("/admin/add-bed")
 async def add_bed(request: BedCreate):
-    new_bed = {
-        "bed_number": request.bed_number,
-        "ward": request.ward,
-        "status": "Available",
-        "patient_id": None
-    }
-    await database.get_collection("beds").insert_one(new_bed)
-    return {"message": f"Bed {request.bed_number} added to {request.ward}"}
+    # Count existing beds in this ward to name them sequentially (e.g., ICU-1, ICU-2)
+    existing_count = await database.get_collection("beds").count_documents({"ward": request.ward})
+    
+    new_beds = []
+    for i in range(1, request.num_beds + 1):
+        bed_number = f"{request.ward}-{existing_count + i}"
+        new_beds.append({
+            "bed_number": bed_number,
+            "ward": request.ward,
+            "status": "Available",
+            "patient_id": None
+        })
+        
+    if new_beds:
+        await database.get_collection("beds").insert_many(new_beds)
+        
+    return {"message": f"Successfully generated {request.num_beds} new beds in {request.ward}."}
 
 @app.get("/admin/beds")
 async def get_beds():

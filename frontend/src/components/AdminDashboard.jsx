@@ -27,8 +27,9 @@ const AdminDashboard = () => {
 
   // V2 Dashboard States
   const [beds, setBeds] = useState([]);
-  const [wardName, setWardName] = useState('');
-  const [bedNum, setBedNum] = useState('');
+  const [wardChoice, setWardChoice] = useState('General');
+  const [numBeds, setNumBeds] = useState('');
+  
   const [stockRequests, setStockRequests] = useState([]);
   const [billingSearchId, setBillingSearchId] = useState('');
   const [billingStatus, setBillingStatus] = useState(null);
@@ -115,12 +116,13 @@ const AdminDashboard = () => {
   const handleAddBed = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://127.0.0.1:8000/admin/add-bed', { bed_number: bedNum, ward: wardName });
-      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Added Bed', user: 'Master Admin', details: `Added bed ${bedNum} to ${wardName}` });
-      setBedNum(''); fetchBeds();
-    } catch (err) {}
+      const res = await axios.post('http://127.0.0.1:8000/admin/add-bed', { num_beds: parseInt(numBeds), ward: wardChoice });
+      await axios.post('http://127.0.0.1:8000/admin/log-action', { action: 'Added Beds', user: 'Master Admin', details: `Bulk added ${numBeds} beds to ${wardChoice}` });
+      setNumBeds(''); fetchBeds();
+      alert("✅ " + res.data.message);
+    } catch (err) { alert("Error adding beds."); }
   };
-
+  
   const handleUpdateBed = async (id, status) => {
     try { await axios.post('http://127.0.0.1:8000/admin/update-bed', { bed_id: id, status }); fetchBeds(); } catch (err) {}
   };
@@ -338,9 +340,12 @@ const AdminDashboard = () => {
             <div className="no-print">
                 <h2>Ward & Bed Management</h2>
                 <form onSubmit={handleAddBed} style={{ display: 'flex', gap: '15px', marginBottom: '30px', backgroundColor: '#0f172a', padding: '20px', borderRadius: '8px' }}>
-                    <input type="text" value={wardName} onChange={(e) => setWardName(e.target.value)} placeholder="Ward Name (e.g. ICU, General)" required style={{ flex: 1, padding: '12px' }} />
-                    <input type="text" value={bedNum} onChange={(e) => setBedNum(e.target.value)} placeholder="Bed Number (e.g. B-101)" required style={{ flex: 1, padding: '12px' }} />
-                    <button type="submit" className="action-button" style={{ width: 'auto' }}>Add Bed</button>
+                    <select value={wardChoice} onChange={(e) => setWardChoice(e.target.value)} required style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white' }}>
+                        <option value="General">General Ward</option>
+                        <option value="ICU">ICU</option>
+                    </select>
+                    <input type="number" value={numBeds} onChange={(e) => setNumBeds(e.target.value)} placeholder="How many beds to create?" required min="1" max="50" style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white' }} />
+                    <button type="submit" className="action-button" style={{ width: 'auto' }}>Generate Beds</button>
                 </form>
                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
                   {beds.map((b) => (
