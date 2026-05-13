@@ -83,7 +83,6 @@ const ReceptionistDashboard = () => {
       } catch (err) { alert("Error finalizing discharge."); }
   };
 
-  // --- BUG FIX: Smart identification fallback for Sanny ---
   const history = dischargePatient?.history || [];
   const pendingMedical = history.some(h => 
       (h.status === 'Waiting Payment' || h.status === 'Pending Price') && 
@@ -158,8 +157,13 @@ const ReceptionistDashboard = () => {
               <form onSubmit={handleAddToQueue} style={{ display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
                 <div className="input-group" style={{ flex: 2, marginBottom: 0 }}><label>Patient ID</label><input type="text" value={queueId} onChange={(e) => setQueueId(e.target.value.toUpperCase())} required /></div>
                 <div className="input-group" style={{ flex: 1, marginBottom: 0 }}><label>Priority</label>
+                  {/* FULL 1-5 PRIORITY SCALE HERE */}
                   <select value={priority} onChange={(e) => setPriority(e.target.value)} className="role-select">
-                    <option value="1">1 - Standard</option><option value="3">3 - Emergency</option><option value="5">5 - Code Red</option>
+                    <option value="1">1 - Standard</option>
+                    <option value="2">2 - Urgent</option>
+                    <option value="3">3 - Emergency</option>
+                    <option value="4">4 - Critical</option>
+                    <option value="5">5 - Code Red</option>
                   </select>
                 </div>
                 <button type="submit" className="action-button" style={{ width: 'auto', padding: '12px 30px' }}>Queue Patient</button>
@@ -168,7 +172,7 @@ const ReceptionistDashboard = () => {
             <div className="form-card">
               <h3 style={{ color: 'white', marginBottom: '15px' }}>Current Lobby</h3>
               {liveQueue.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', backgroundColor: '#0f172a', borderLeft: p.priority > 3 ? '4px solid #ef4444' : '4px solid #10b981', marginBottom: '10px', borderRadius: '8px' }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', backgroundColor: '#0f172a', borderLeft: p.priority === 5 ? '4px solid #ef4444' : p.priority >= 3 ? '4px solid #f59e0b' : '4px solid #10b981', marginBottom: '10px', borderRadius: '8px' }}>
                     <span style={{ color: 'white', fontWeight: 'bold' }}>{p.patient_id} - {p.patient_name}</span>
                     <span style={{ color: '#94a3b8' }}>Priority: {p.priority}</span>
                   </div>
