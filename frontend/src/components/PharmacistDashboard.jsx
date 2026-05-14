@@ -16,6 +16,10 @@ const PharmacistDashboard = () => {
   const [stockName, setStockName] = useState('');
   const [stockQty, setStockQty] = useState('');
   const [prices, setPrices] = useState({});
+  
+  // NEW: Manual Deduction States
+  const [deductItem, setDeductItem] = useState({});
+  const [deductQty, setDeductQty] = useState({});
 
   // Fetch Logic
   const fetchPrescriptions = async () => {
@@ -48,10 +52,19 @@ const PharmacistDashboard = () => {
     } catch (err) { alert("Error setting price."); }
   };
 
+  // NEW: Enhanced Dispense Logic
   const handleDispense = async (id) => {
     try {
-      await axios.post('http://127.0.0.1:8000/dispense-medication', { record_id: id });
+      const itemToDeduct = deductItem[id];
+      const qtyToDeduct = parseInt(deductQty[id]) || 0;
+
+      await axios.post('http://127.0.0.1:8000/dispense-medication', { 
+          record_id: id,
+          medicine_name: itemToDeduct === 'none' ? null : itemToDeduct,
+          quantity: qtyToDeduct
+      });
       fetchPrescriptions();
+      fetchInventory(); // Force refresh to see stock drop immediately
     } catch (err) { alert("Error dispensing medication."); }
   };
 
@@ -64,7 +77,6 @@ const PharmacistDashboard = () => {
     } catch (err) { alert("Error sending request."); }
   };
 
-  // Determine Low Stock Items (Threshold: 20 units)
   const lowStockItems = inventory.filter(item => item.stock < 20);
 
   return (
@@ -118,29 +130,57 @@ const PharmacistDashboard = () => {
                         </div>
                     ) : (
                         prescriptions.filter(p => p.status !== "Dispensed").map((req) => (
-                            <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '20px', borderRadius: '12px', borderLeft: req.status === "Paid" ? '4px solid #10b981' : req.status === "Waiting Payment" ? '4px solid #f59e0b' : '4px solid #38bdf8' }}>
-                                <div style={{ flex: 1 }}>
-                                    <h3 style={{ margin: 0, color: 'white' }}>{req.patient_id}</h3>
-                                    <p style={{ margin: '5px 0 10px 0', fontSize: '18px', color: '#ec4899', fontWeight: 'bold' }}>Rx: {req.prescription}</p>
-                                    <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', backgroundColor: req.status === "Paid" ? '#10b98120' : '#f59e0b20', color: req.status === "Paid" ? '#10b981' : '#f59e0b' }}>
-                                        Status: {req.status}
-                                    </span>
+                            <div key={req.id} style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#0f172a', padding: '20px', borderRadius: '12px', borderLeft: req.status === "Paid" ? '4px solid #10b981' : req.status === "Waiting Payment" ? '4px solid #f59e0b' : '4px solid #38bdf8' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <h3 style={{ margin: 0, color: 'white' }}>{req.patient_id}</h3>
+                                        <p style={{ margin: '5px 0 10px 0', fontSize: '18px', color: '#ec4899', fontWeight: 'bold' }}>Rx: {req.prescription}</p>
+                                        <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', backgroundColor: req.status === "Paid" ? '#10b98120' : '#f59e0b20', color: req.status === "Paid" ? '#10b981' : '#f59e0b' }}>
+                                            Status: {req.status}
+                                        </span>
+                                    </div>
+
+                                    {req.status === "Pending Price" && (
+                                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                            <div style={{ position: 'relative' }}>
+                                                <IndianRupee size={16} style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                                                <input type="number" placeholder="Enter Price" value={prices[req.id] || ''} onChange={(e) => handlePriceChange(req.id, e.target.value)} style={{ padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#1e293b', color: 'white', width: '120px' }} />
+                                            </div>
+                                            <button onClick={() => handleSetPrice(req.id)} className="action-button" style={{ width: 'auto', backgroundColor: '#38bdf8' }}>Send to Billing</button>
+                                        </div>
+                                    )}
                                 </div>
 
-                                {req.status === "Pending Price" && (
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                        <div style={{ position: 'relative' }}>
-                                            <IndianRupee size={16} style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
-                                            <input type="number" placeholder="Enter Price" value={prices[req.id] || ''} onChange={(e) => handlePriceChange(req.id, e.target.value)} style={{ padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #1e293b', backgroundColor: '#1e293b', color: 'white', width: '120px' }} />
-                                        </div>
-                                        <button onClick={() => handleSetPrice(req.id)} className="action-button" style={{ width: 'auto', backgroundColor: '#38bdf8' }}>Send to Billing</button>
-                                    </div>
-                                )}
-
+                                {/* NEW: INLINE INVENTORY DEDUCTION TOOL */}
                                 {req.status === "Paid" && (
-                                    <button onClick={() => handleDispense(req.id)} className="action-button" style={{ width: 'auto', backgroundColor: '#10b981', padding: '12px 24px', fontSize: '16px' }}>
-                                        <CheckCircle2 size={18} style={{ marginRight: '8px', display: 'inline' }} /> Hand Over Medicine
-                                    </button>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '15px', paddingTop: '15px', borderTop: '1px dashed #1e293b' }}>
+                                        <div style={{ padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px', display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '14px' }}>Deduct Stock:</span>
+                                            <select 
+                                                value={deductItem[req.id] || ''} 
+                                                onChange={(e) => setDeductItem(prev => ({ ...prev, [req.id]: e.target.value }))}
+                                                style={{ flex: 1, padding: '8px', borderRadius: '6px', backgroundColor: '#0f172a', color: 'white', border: '1px solid #334155' }}
+                                            >
+                                                <option value="">Select Medicine...</option>
+                                                <option value="none">No Inventory Deduction</option>
+                                                {inventory.map(inv => <option key={inv.item_id} value={inv.medicine_name}>{inv.medicine_name} (Stock: {inv.stock})</option>)}
+                                            </select>
+                                            
+                                            {deductItem[req.id] && deductItem[req.id] !== 'none' && (
+                                                <input 
+                                                    type="number" 
+                                                    min="1" 
+                                                    placeholder="Qty" 
+                                                    value={deductQty[req.id] || ''} 
+                                                    onChange={(e) => setDeductQty(prev => ({ ...prev, [req.id]: e.target.value }))}
+                                                    style={{ padding: '8px', borderRadius: '6px', backgroundColor: '#0f172a', color: 'white', border: '1px solid #334155', width: '70px' }}
+                                                />
+                                            )}
+                                        </div>
+                                        <button onClick={() => handleDispense(req.id)} className="action-button" style={{ width: 'auto', backgroundColor: '#10b981', padding: '10px 20px', fontSize: '14px', margin: 0 }}>
+                                            <CheckCircle2 size={18} style={{ marginRight: '8px', display: 'inline' }} /> Hand Over Medicine
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         ))

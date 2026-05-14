@@ -4,12 +4,11 @@ import axios from 'axios';
 import { 
   HeartPulse, FileText, IndianRupee, Pill, 
   Microscope, LogOut, PhoneCall, History, 
-  UserCircle, Calendar, CheckCircle2 
+  UserCircle, Calendar, CheckCircle2, Bed 
 } from 'lucide-react';
 
 const PatientDashboard = () => {
   const navigate = useNavigate();
-  // In your system, the 'email' slot in localStorage holds the Patient ID during login
   const patientId = localStorage.getItem('email'); 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +51,8 @@ const PatientDashboard = () => {
         <div style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', marginBottom: '30px' }}>
           <UserCircle size={40} color="#38bdf8" style={{ marginBottom: '10px' }} />
           <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{data.profile.name}</h3>
-          <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '4px' }}>ID: {data.profile.id}</p>
+          {/* FIXED: ID Lookup */}
+          <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '4px' }}>ID: {data.profile.patient_id}</p>
         </div>
 
         <nav style={{ flex: 1 }}>
@@ -61,7 +61,7 @@ const PatientDashboard = () => {
           </div>
         </nav>
 
-        <button onClick={handleLogout} className="logout-button" style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f87171' }}>
+        <button onClick={handleLogout} className="logout-button" style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>
           <LogOut size={20} /> Secure Logout
         </button>
       </aside>
@@ -73,7 +73,7 @@ const PatientDashboard = () => {
             <h1 style={{ fontSize: '2.5rem', margin: 0 }}>Health Timeline</h1>
             <p style={{ color: '#94a3b8' }}>Your digital medical journey and clinical updates.</p>
           </div>
-          <button className="action-button" style={{ width: 'auto', padding: '12px 24px', backgroundColor: '#f59e0b', color: 'black', fontWeight: '600', display: 'flex', gap: '8px' }}>
+          <button className="action-button" style={{ width: 'auto', padding: '12px 24px', backgroundColor: '#f59e0b', color: 'black', fontWeight: '600', display: 'flex', gap: '8px', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
             <PhoneCall size={20} /> Emergency Assistance
           </button>
         </div>
@@ -84,34 +84,45 @@ const PatientDashboard = () => {
           <section>
             <h3 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>Medical History</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {data.history.map((record, i) => (
-                <div key={i} style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.9rem' }}>
-                      <Calendar size={16} /> {record.date}
-                    </div>
-                    <span style={{ color: '#0ea5e9', fontSize: '0.85rem', fontWeight: '600' }}>Dr. {record.doctor}</span>
-                  </div>
-                  
-                  <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>{record.diagnosis}</h4>
-                  <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
-                    <div style={{ flex: 1, backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px' }}>
-                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0' }}>PRESCRIPTION</p>
-                      <p style={{ margin: 0, color: '#e2e8f0' }}><Pill size={14} style={{ display: 'inline', marginRight: '5px' }} /> {record.prescription}</p>
-                    </div>
-                  </div>
+              {data.history.map((record, i) => {
+                const isFacility = record.type === 'Discharge/Facility';
+                // Clean up the doctor's name format
+                const docName = record.doctor.includes('+') ? record.doctor.split('+')[1].split('@')[0].toUpperCase() : 'HOSPITAL STAFF';
 
-                  {record.lab_result !== "N/A" && (
-                    <div style={{ borderTop: '1px dashed #334155', paddingTop: '15px', marginTop: '10px' }}>
-                      <p style={{ fontSize: '0.75rem', color: '#8b5cf6', margin: '0 0 5px 0' }}>LAB FINDINGS</p>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                        <Microscope size={18} color="#8b5cf6" />
-                        <p style={{ margin: 0, fontSize: '0.95rem' }}>{record.lab_result}</p>
+                return (
+                  <div key={i} style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.9rem' }}>
+                        <Calendar size={16} /> {record.date}
+                      </div>
+                      <span style={{ color: '#0ea5e9', fontSize: '0.85rem', fontWeight: '600' }}>Dr. {docName}</span>
+                    </div>
+                    
+                    <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>{record.diagnosis}</h4>
+                    <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                      <div style={{ flex: 1, backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px' }}>
+                        <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0' }}>
+                          {isFacility ? 'FACILITY DETAILS' : 'PRESCRIPTION'}
+                        </p>
+                        <p style={{ margin: 0, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                           {isFacility ? <Bed size={16} color="#a855f7" /> : <Pill size={16} color="#10b981" />} 
+                           {record.prescription}
+                        </p>
                       </div>
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {record.lab_result && record.lab_result !== "N/A" && (
+                      <div style={{ borderTop: '1px dashed #334155', paddingTop: '15px', marginTop: '10px' }}>
+                        <p style={{ fontSize: '0.75rem', color: '#8b5cf6', margin: '0 0 5px 0' }}>LAB FINDINGS</p>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                          <Microscope size={18} color="#8b5cf6" />
+                          <p style={{ margin: 0, fontSize: '0.95rem' }}>{record.lab_result}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
 

@@ -6,12 +6,10 @@ import security
 import datetime
 from bson import ObjectId
 
-# IMPORT FIX: Properly importing the 'database' object alongside the specific collections
 from database import database, user_collection, patient_collection, record_collection
 
 app = FastAPI(title="AARUGHA Master API")
 
-# CORS Middleware (Allows your React frontend to talk to this Python backend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -20,9 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================================
-# SCHEMAS
-# ==========================================
 class LoginRequest(BaseModel):
     username: str 
     password: str
@@ -42,12 +37,13 @@ class StaffCreate(BaseModel):
 class BedCreate(BaseModel):
     ward: str
     num_beds: int
+
 class PatientCreate(BaseModel):
     name: str
     phone: str
-    age: int          # <-- NEW
-    gender: str       # <-- NEW
-    blood_group: str  # <-- NEW
+    age: int          
+    gender: str       
+    blood_group: str  
 
 class MedicalRecord(BaseModel):
     patient_id: str
@@ -60,23 +56,10 @@ class MedicalRecord(BaseModel):
     allocate_bed: bool = False
     ward_choice: str = None
 
-class BedUpdate(BaseModel):
-    bed_id: str
-    status: str
-    patient_id: str = None
-
-class QueueEntry(BaseModel):
-    patient_id: str
-    priority: int
-    doctor_email: str
-
 class StockRequest(BaseModel):
     medicine_name: str
     quantity: int
 
-# ==========================================
-# STARTUP SCRIPT
-# ==========================================
 @app.on_event("startup")
 async def create_master_admin():
     master_email = "unagasairao+admin@gmail.com"
@@ -94,9 +77,6 @@ async def create_master_admin():
         await user_collection.insert_one(new_admin)
         print("👑 Master Admin account automatically generated in MongoDB Atlas!")
 
-# ==========================================
-# AUTHENTICATION & ADMIN ROUTES
-# ==========================================
 @app.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
     user = await user_collection.find_one({"email": request.username})
@@ -153,9 +133,6 @@ async def delete_staff(email: str):
         raise HTTPException(status_code=404, detail="Staff member not found.")
     return {"message": f"Successfully deleted {email} from cloud."}
 
-# ==========================================
-# RECEPTIONIST & QUEUE ROUTES
-# ==========================================
 @app.post("/register-patient")
 async def register_patient(request: PatientCreate):
     last_patient = await patient_collection.find_one(sort=[("patient_id", -1)])
@@ -171,14 +148,15 @@ async def register_patient(request: PatientCreate):
         "patient_id": new_id,
         "name": request.name,
         "phone": request.phone,
-        "age": request.age,                # <-- NEW
-        "gender": request.gender,          # <-- NEW
-        "blood_group": request.blood_group,# <-- NEW
+        "age": request.age,                
+        "gender": request.gender,          
+        "blood_group": request.blood_group,
         "default_password": hashed_pw
     }
     
     await patient_collection.insert_one(new_patient)
     return {"message": "Patient Successfully Registered!", "patient_id": new_id, "password": request.phone}
+
 @app.post("/add-to-queue")
 async def add_to_queue(payload: dict):
     patient_id = payload.get("patient_id").upper()
@@ -200,7 +178,6 @@ async def add_to_queue(payload: dict):
 
 @app.get("/hospital-live-status")
 async def get_hospital_status():
-    # 1. Tally up the beds
     beds_cursor = database.get_collection("beds").find()
     total_beds = 0
     occupied_beds = 0
@@ -213,14 +190,12 @@ async def get_hospital_status():
         elif bed.get("status") != "Available":
             occupied_beds += 1
 
-    # 2. Find the registered Doctors
     staff_cursor = database.get_collection("staff").find({"role": "Doctor"})
     doctors = []
     async for doc in staff_cursor:
         email = doc.get("email", "")
         name = "Doctor"
         if "+" in email and "@" in email:
-            # Converts "unagasairao+daya.lal@gmail.com" to "Daya Lal"
             name = email.split("+")[1].split("@")[0].replace(".", " ").title()
         doctors.append({"name": name, "status": "Available"})
 
@@ -247,9 +222,6 @@ async def get_live_queue():
         })
     return queue
 
-# ==========================================
-# DOCTOR & CLINICAL ROUTES
-# ==========================================
 @app.get("/patient/{patient_id}")
 async def get_patient(patient_id: str):
     patient = await patient_collection.find_one({"patient_id": patient_id.upper()})
@@ -268,7 +240,6 @@ async def get_patient(patient_id: str):
             "lab_result": record.get("lab_result", "N/A")
         })
         
-    # We added the new fields to the return dictionary here!
     return {
         "patient_name": patient["name"], 
         "patient_phone": patient["phone"],
@@ -280,36 +251,34 @@ async def get_patient(patient_id: str):
 
 @app.post("/add-medical-record")
 async def add_record(record: MedicalRecord):
-    
-    # --- NEW: STRICT BED ALLOCATION LOGIC ---
     if record.allocate_bed and record.ward_choice:
-        # Search for an explicitly "Available" bed in the requested ward
         free_bed = await database.get_collection("beds").find_one({
             "ward": record.ward_choice,
             "status": "Available"
         })
         
-        # If no beds are free (or they are all Cleaning/Occupied), BLOCK the submission!
         if not free_bed:
             raise HTTPException(
                 status_code=400, 
                 detail=f"CRITICAL: No 'Available' beds remaining in {record.ward_choice}. Please check ward capacity or wait for staff to finish cleaning."
             )
         
-        # If a bed is free, instantly lock it down and assign the patient to it
         await database.get_collection("beds").update_one(
             {"_id": free_bed["_id"]},
             {"$set": {"status": "Occupied", "patient_id": record.patient_id.upper()}}
         )
 
-    # Proceed with saving the medical record as normal
+    final_status = record.status
+    if record.type in ["Consultation/Pharmacy", "Lab/Scan"]:
+        final_status = "Pending Price"
+
     new_record = {
         "patient_id": record.patient_id.upper(),
         "doctor_email": record.doctor_email,
         "diagnosis": record.diagnosis,
         "prescription": record.prescription,
         "notes": record.notes,
-        "status": record.status,
+        "status": final_status,
         "type": record.type,
         "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
@@ -318,9 +287,6 @@ async def add_record(record: MedicalRecord):
     await database.get_collection("queue").delete_one({"patient_id": record.patient_id.upper()})
     return {"message": "Medical record successfully signed and saved."}
 
-# ==========================================
-# PHARMACY & BILLING ROUTES
-# ==========================================
 @app.get("/pending-prescriptions")
 async def get_pending_prescriptions():
     cursor = record_collection.find({"type": "Consultation/Pharmacy"}).sort("date", -1)
@@ -366,7 +332,6 @@ async def get_pending_billing_patients():
     patients = set()
     async for doc in cursor:
         patients.add(doc["patient_id"])
-    # Returns a clean, sorted list of patient IDs who owe money
     return sorted(list(patients))
 
 @app.post("/confirm-payment")
@@ -382,21 +347,24 @@ async def confirm_payment(payload: dict):
 @app.post("/dispense-medication")
 async def dispense_medication(payload: dict):
     record_id = payload.get("record_id")
+    medicine_name = payload.get("medicine_name")
+    quantity = payload.get("quantity", 0)
+    
+    if medicine_name and quantity > 0:
+        await database.get_collection("inventory").update_one(
+            {"medicine_name": medicine_name},
+            {"$inc": {"stock": -quantity}}
+        )
     
     await record_collection.update_one(
         {"_id": ObjectId(record_id)},
         {"$set": {"status": "Dispensed"}}
     )
-    return {"message": "Medication successfully handed to patient."}
+    return {"message": "Medication successfully handed to patient and stock updated."}
 
-# ==========================================
-# ADMIN V2 ROUTES (Beds & Inventory)
-# ==========================================
 @app.post("/admin/add-bed")
 async def add_bed(request: BedCreate):
-    # Count existing beds in this ward to name them sequentially (e.g., ICU-1, ICU-2)
     existing_count = await database.get_collection("beds").count_documents({"ward": request.ward})
-    
     new_beds = []
     for i in range(1, request.num_beds + 1):
         bed_number = f"{request.ward}-{existing_count + i}"
@@ -406,10 +374,8 @@ async def add_bed(request: BedCreate):
             "status": "Available",
             "patient_id": None
         })
-        
     if new_beds:
         await database.get_collection("beds").insert_many(new_beds)
-        
     return {"message": f"Successfully generated {request.num_beds} new beds in {request.ward}."}
 
 @app.get("/admin/beds")
@@ -436,8 +402,6 @@ async def update_bed(payload: dict):
     )
     return {"message": f"Bed status updated to {status}"}
 
-from bson import ObjectId # Make sure you have this import at the top if it isn't already there!
-
 @app.delete("/admin/delete-bed/{bed_id}")
 async def delete_bed(bed_id: str):
     await database.get_collection("beds").delete_one({"_id": ObjectId(bed_id)})
@@ -463,13 +427,11 @@ async def approve_stock(payload: dict):
     medicine_name = payload.get("medicine_name")
     quantity = int(payload.get("quantity"))
     
-    # 1. Mark request as Approved
     await database.get_collection("inventory_requests").update_one(
         {"_id": ObjectId(request_id)},
         {"$set": {"status": "Approved"}}
     )
     
-    # 2. Add to actual Inventory Database!
     existing_item = await database.get_collection("inventory").find_one({"medicine_name": medicine_name})
     if existing_item:
         await database.get_collection("inventory").update_one(
@@ -482,9 +444,9 @@ async def approve_stock(payload: dict):
             "stock": quantity
         })
     return {"message": f"Approved {quantity}x {medicine_name}. Added to Inventory!"}
+
 @app.get("/admin/audit-logs")
 async def get_audit_logs():
-    # Fetches the 50 most recent logs from the database
     cursor = database.get_collection("audit_logs").find().sort("timestamp", -1).limit(50)
     logs = []
     async for log in cursor:
@@ -499,7 +461,6 @@ async def get_audit_logs():
 
 @app.post("/admin/log-action")
 async def log_action(payload: dict):
-    # A universal endpoint you can call anytime you want to record an event!
     log_entry = {
         "action": payload.get("action"),
         "user": payload.get("user"),
@@ -511,13 +472,12 @@ async def log_action(payload: dict):
 
 @app.post("/admin/clear-all-bills/{patient_id}")
 async def clear_all_bills(patient_id: str):
-    await database.get_collection("records").update_many(
+    await record_collection.update_many(
         {"patient_id": patient_id.upper(), "status": "Waiting Payment"},
         {"$set": {"status": "Paid"}}
     )
     return {"message": "All bills cleared!"}
 
-# OVERWRITE the old /request-stock route to use the new inventory_requests collection
 @app.post("/request-stock")
 async def request_stock(request: StockRequest):
     log_entry = {
@@ -542,19 +502,15 @@ async def get_inventory():
         })
     return inventory
 
-# ==========================================
-# PATIENT PORTAL
-# ==========================================
 @app.get("/patient-portal-full/{patient_id}")
 async def get_patient_portal_full(patient_id: str):
     patient = await database.get_collection("patients").find_one({"patient_id": patient_id.upper()})
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    # Safely convert the ObjectId to a string
     patient["_id"] = str(patient["_id"])
     
-    cursor = database.get_collection("records").find({"patient_id": patient_id.upper()})
+    cursor = record_collection.find({"patient_id": patient_id.upper()})
     history = []
     async for doc in cursor:
         history.append({
@@ -564,11 +520,12 @@ async def get_patient_portal_full(patient_id: str):
             "price": doc.get("price", 0),
             "status": doc.get("status", "Pending"),
             "type": doc.get("type", "Medical"),
-            "date": doc.get("date", "")
+            "date": doc.get("date", ""),
+            "doctor": doc.get("doctor_email", "Hospital Staff"),
+            "lab_result": doc.get("lab_result", "N/A")
         })
     
     return {"profile": patient, "history": history}
-
 
 class FacilityBill(BaseModel):
     patient_id: str
@@ -577,7 +534,6 @@ class FacilityBill(BaseModel):
 
 @app.post("/discharge/add-bill")
 async def add_facility_bill(request: FacilityBill):
-    # This automatically sends the final bed cost directly to the Billing Dept!
     record = {
         "patient_id": request.patient_id.upper(),
         "doctor_email": "Administration",
@@ -589,24 +545,21 @@ async def add_facility_bill(request: FacilityBill):
         "price": request.amount,
         "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
-    await database.get_collection("records").insert_one(record)
+    await record_collection.insert_one(record)
     return {"message": "Facility bill generated and sent to Billing Department."}
 
 @app.post("/discharge/finalize")
 async def finalize_discharge(payload: dict):
     patient_id = payload.get("patient_id").upper()
-    
-    # 1. Fetch all records to build the final invoice
-    cursor = database.get_collection("records").find({"patient_id": patient_id})
+    cursor = record_collection.find({"patient_id": patient_id})
     history = []
     total = 0
     
     async for doc in cursor:
-        price = doc.get("price", 0)
-        # Clean the price data
-        if isinstance(price, str) and price.isdigit():
-            price = int(price)
-        elif not isinstance(price, (int, float)):
+        raw_price = doc.get("price", 0)
+        try:
+            price = float(raw_price)
+        except (ValueError, TypeError):
             price = 0
             
         history.append({
@@ -614,12 +567,13 @@ async def finalize_discharge(payload: dict):
             "desc": doc.get("prescription", ""),
             "amount": price,
             "status": doc.get("status", "Unknown"),
+            "type": doc.get("type", "Medical"),
             "date": doc.get("date", "")
         })
-        if doc.get("status") == "Paid":
+        
+        # FIX: Include "Dispensed" medications alongside "Paid" facility/lab charges!
+        if doc.get("status") in ["Paid", "Dispensed"]:
             total += price
             
-    # 2. Clear them from the live medical queue
     await database.get_collection("queue").delete_one({"patient_id": patient_id})
-
     return {"message": "Patient Discharged", "receipt": history, "total": total}
