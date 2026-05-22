@@ -1,6 +1,6 @@
 # backend/database.py
 import motor.motor_asyncio
-#import certifi
+import certifi
 
 # REPLACE THIS STRING with your actual MongoDB Atlas connection string!
 # Make sure to swap out <db_password> with your database user's password.
