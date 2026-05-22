@@ -135,7 +135,7 @@ const PatientDashboard = () => {
                   <div>
                     <p style={{ margin: 0, fontWeight: '500' }}>{bill.diagnosis}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                      {bill.status === 'Paid' ? (
+                      {bill.status === 'Paid' || bill.status === 'Dispensed' ? (
                         <><CheckCircle2 size={14} color="#22c55e" /> <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>Payment Confirmed</span></>
                       ) : (
                         <><IndianRupee size={14} color="#f59e0b" /> <span style={{ color: '#f59e0b', fontSize: '0.8rem' }}>Waiting at Billing Desk</span></>

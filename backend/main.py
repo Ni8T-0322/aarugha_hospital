@@ -571,9 +571,16 @@ async def finalize_discharge(payload: dict):
             "date": doc.get("date", "")
         })
         
-        # FIX: Include "Dispensed" medications alongside "Paid" facility/lab charges!
+        # Include "Dispensed" medications alongside "Paid" facility/lab charges
         if doc.get("status") in ["Paid", "Dispensed"]:
             total += price
             
     await database.get_collection("queue").delete_one({"patient_id": patient_id})
+    
+    #  BUG FIX: Automatically set their specific bed to "Cleaning" and remove them
+    await database.get_collection("beds").update_many(
+        {"patient_id": patient_id},
+        {"$set": {"status": "Cleaning", "patient_id": None}}
+    )
+    
     return {"message": "Patient Discharged", "receipt": history, "total": total}
