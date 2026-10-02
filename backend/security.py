@@ -4,7 +4,7 @@ import jwt
 from datetime import datetime, timedelta
 
 # In a real deployed app, this would be hidden in a secure .env file!
-SECRET_KEY = "AARUGHA_MASTER_KEY_PROTECT_AT_ALL_COSTS"
+SECRET_KEY = "YOUR_SUPER_SECRET_KEY_HERE"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 hours (standard hospital shift)
 

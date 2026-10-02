@@ -4,7 +4,7 @@ import motor.motor_asyncio
 
 # REPLACE THIS STRING with your actual MongoDB Atlas connection string!
 # Make sure to swap out <db_password> with your database user's password.
-MONGO_DETAILS = "mongodb+srv://unagasairao_db_user:dFED7gj7d95gemHR@cluster0.kgjfrqj.mongodb.net/?appName=Cluster0"
+MONGO_DETAILS = "mongodb+srv://<USERNAME>:<PASSWORD>@cluster0.kgjfrqj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DETAILS)
 
