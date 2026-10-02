@@ -9,7 +9,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True) # e.g., unagasairao+admin@gmail.com
+    email = Column(String, unique=True, index=True) # e.g., admin@hospitrax.com
     hashed_password = Column(String)
     role = Column(String) # Admin, Receptionist, Doctor, Pharmacist, Lab, Billing, Display
     is_active = Column(Boolean, default=True)
@@ -113,4 +113,4 @@ class AuditLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action = Column(String) # e.g., "Admin unagasairao+admin@gmail.com approved 500 Paracetamol"
+    action = Column(String) # e.g., "Admin admin@hospitrax.com approved 500 Paracetamol"

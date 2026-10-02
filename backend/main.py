@@ -62,7 +62,7 @@ class StockRequest(BaseModel):
 
 @app.on_event("startup")
 async def create_master_admin():
-    master_email = "unagasairao+admin@gmail.com"
+    master_email = "admin@hospitrax.com"
     admin = await user_collection.find_one({"email": master_email})
     
     if not admin:
